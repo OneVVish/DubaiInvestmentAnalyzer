@@ -1,7 +1,7 @@
 const COLUMNS = [
   { key: 'year', label: 'Year' },
-  { key: 'buyerNetWorth', label: 'Buyer Net Worth (AED)' },
-  { key: 'renterNetWorth', label: 'Renter Net Worth (AED)' },
+  { key: 'buyerNetWorth', label: 'Dubai Property Net Worth (AED)' },
+  { key: 'renterNetWorth', label: 'Alternate Investment Net Worth (AED)' },
   { key: 'homeValue', label: 'Home Value (AED)' },
 ]
 

@@ -63,11 +63,11 @@ export default function PrintReport({
         <p className="mb-3 text-base">
           {isFlip
             ? breakEvenYear
-              ? `Buying overtakes investing the same capital by the flip, in year ${breakEvenYear}.`
-              : `Investing the same capital still beats buying at the flip (year ${flipYear}).`
+              ? `Dubai Property overtakes the Alternate Investment by the flip, in year ${breakEvenYear}.`
+              : `The Alternate Investment still beats Dubai Property at the flip (year ${flipYear}).`
             : breakEvenYear
-              ? `Buying overtakes investing the same capital in year ${breakEvenYear}.`
-              : 'Over 30 years, investing the same capital beats buying in this scenario.'}
+              ? `Dubai Property overtakes the Alternate Investment in year ${breakEvenYear}.`
+              : 'Over 30 years, the Alternate Investment beats Dubai Property in this scenario.'}
         </p>
         <div className={`grid gap-4 ${isFlip ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <div className="rounded-lg border border-slate-200 p-3">
@@ -80,7 +80,7 @@ export default function PrintReport({
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
-              {isFlip ? `Buyer Net Worth (at Flip, Yr ${flipYear})` : 'Buyer Net Worth (Yr 30)'}
+              {isFlip ? `Dubai Property Net Worth (at Flip, Yr ${flipYear})` : 'Dubai Property Net Worth (Yr 30)'}
             </p>
             <p className={`text-lg font-bold ${buyerWinsAt30 ? 'text-amber-600' : ''}`}>
               {finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
@@ -88,7 +88,7 @@ export default function PrintReport({
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
-              {isFlip ? `Renter Net Worth (at Flip, Yr ${flipYear})` : 'Renter Net Worth (Yr 30)'}
+              {isFlip ? `Alternate Investment Net Worth (at Flip, Yr ${flipYear})` : 'Alternate Investment Net Worth (Yr 30)'}
             </p>
             <p className={`text-lg font-bold ${!buyerWinsAt30 ? 'text-sky-600' : ''}`}>
               {finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
@@ -127,7 +127,7 @@ export default function PrintReport({
               <Line
                 type="monotone"
                 dataKey="buyerNetWorth"
-                name="Buying"
+                name="Dubai Property"
                 stroke="#f59e0b"
                 strokeWidth={2}
                 dot={false}
@@ -136,7 +136,7 @@ export default function PrintReport({
               <Line
                 type="monotone"
                 dataKey="renterNetWorth"
-                name="Investing Instead"
+                name="Alternate Investment"
                 stroke="#0284c7"
                 strokeWidth={2}
                 dot={false}
@@ -149,7 +149,7 @@ export default function PrintReport({
 
       <section className="mb-6" style={{ breakInside: 'avoid' }}>
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
-          Buyer Net Worth: Equity vs Appreciation
+          Dubai Property Net Worth: Equity vs Appreciation
         </h2>
         <p className="mb-3 text-sm">
           Cost-Basis Equity is what you've actually paid in (mortgage paydown or developer
@@ -157,9 +157,9 @@ export default function PrintReport({
           of exit tax and selling costs. Invested Rental Surplus is the landlord's accumulated
           rental profit — rent collected, net of vacancy, minus the mortgage (or off-plan
           installment) and carrying costs — reinvested and compounding. Together, these three are
-          Buyer Net Worth — the Buying line above.
+          Dubai Property Net Worth — the Dubai Property line in the chart above.
           {isOffPlan &&
-            " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value."}
+            " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Dubai Property Net Worth, since it's idle capital, not realized property value."}
           {isFlip &&
             ' In the flip year itself, the payout is attributed back to Cost-Basis Equity and Appreciation Gain (where it actually came from) rather than shown as cash — only in years after the flip does it become an undifferentiated reinvested portfolio.'}
         </p>
@@ -306,10 +306,12 @@ export default function PrintReport({
 
       <footer className="border-t border-slate-200 pt-3 text-xs text-slate-400">
         {isFlip &&
-          `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Buyer path is just a generic reinvested portfolio, not a real estate projection. `}
-        Tax calculations are simplified estimates based on standard 2026 primary residence and
-        capital gains laws. Off-plan milestones are estimates. Figures are illustrative
-        projections, not financial advice.
+          `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
+        Tax calculations are simplified estimates based on standard 2026 tax rules — Hold exits
+        default to investment-property rates unless marked a Personal Primary Residence (Global
+        Tax Profile). Off-plan milestones, appreciation, and rental income are estimates; the
+        mortgage model assumes one fixed rate for the full term and doesn't enforce real UAE
+        loan-to-value limits. Figures are illustrative projections, not financial advice.
       </footer>
     </div>
   )

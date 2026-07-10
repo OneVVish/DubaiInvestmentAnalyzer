@@ -692,7 +692,7 @@ export default function App() {
               />
               <Toggle
                 label="Personal Primary Residence"
-                description="I will live here, not rent it out — unlocks primary-residence tax relief (US $250K exemption, UK/Canada 0% CGT). Off by default, since Buying models a rental throughout; when off, a Hold exit is taxed at the same rate as a Flip."
+                description="I will live here, not rent it out — unlocks primary-residence tax relief (US $250K exemption, UK/Canada 0% CGT). Off by default, since the Dubai Property choice models a rental throughout; when off, a Hold exit is taxed at the same rate as a Flip."
                 checked={inputs.isPrimaryResidence}
                 onChange={setField('isPrimaryResidence')}
               />
@@ -704,16 +704,16 @@ export default function App() {
             <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-900/40 p-6 shadow-lg shadow-black/20">
               <p className="text-xs uppercase tracking-wider text-slate-400">Break-Even Point</p>
               <p className="text-2xl font-bold text-white">
-                {displayBreakEvenYear ? `Year ${displayBreakEvenYear}` : 'Renting Wins'}
+                {displayBreakEvenYear ? `Year ${displayBreakEvenYear}` : 'Alternate Investment Wins'}
               </p>
               <p className="mt-1 max-w-xl text-sm text-slate-400">
                 {isFlip
                   ? displayBreakEvenYear
-                    ? `Buying overtakes investing the same capital by the flip, in year ${displayBreakEvenYear}.`
-                    : `Investing the same capital still beats buying at the flip (year ${flipYear}).`
+                    ? `Dubai Property overtakes the Alternate Investment by the flip, in year ${displayBreakEvenYear}.`
+                    : `The Alternate Investment still beats Dubai Property at the flip (year ${flipYear}).`
                   : displayBreakEvenYear
-                    ? `Buying overtakes investing the same capital in year ${displayBreakEvenYear}.`
-                    : 'Over 30 years, investing the same capital beats buying in this scenario.'}
+                    ? `Dubai Property overtakes the Alternate Investment in year ${displayBreakEvenYear}.`
+                    : 'Over 30 years, the Alternate Investment beats Dubai Property in this scenario.'}
               </p>
 
               <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -734,16 +734,16 @@ export default function App() {
                   }
                 />
                 <StatCard
-                  label={isFlip ? `Buyer Net Worth (at Flip, Yr ${flipYear})` : 'Buyer Net Worth (Yr 30)'}
+                  label={isFlip ? `Dubai Property Net Worth (at Flip, Yr ${flipYear})` : 'Dubai Property Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
                   accentClass={buyerWinsAt30 ? 'text-amber-400' : 'text-slate-300'}
                   tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax (full investment-property rate by default, unless Personal Primary Residence is on below) — plus accumulated rental surplus (rent collected, net of vacancy, minus the mortgage/installment and carrying costs, reinvested). Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
                 />
                 <StatCard
-                  label={isFlip ? `Renter Net Worth (at Flip, Yr ${flipYear})` : 'Renter Net Worth (Yr 30)'}
+                  label={isFlip ? `Alternate Investment Net Worth (at Flip, Yr ${flipYear})` : 'Alternate Investment Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
                   accentClass={!buyerWinsAt30 ? 'text-rose-400' : 'text-slate-300'}
-                  tooltip="Starting capital equal to the Buyer's own month-0 cash outlay, plus every month's mortgage payment (or off-plan developer installment) the Buyer would have put into building home equity — invested instead, compounding at your Global Tax Profile's net stock return. Rent isn't part of this comparison; it's the Buying side's own rental income (Invested Rental Surplus)."
+                  tooltip="Starting capital equal to Dubai Property's own month-0 cash outlay, plus every month's mortgage payment (or off-plan developer installment) that would have gone into building home equity — invested here instead, compounding at your Global Tax Profile's net stock return. Rent isn't part of this comparison; it's Dubai Property's own rental income (Invested Rental Surplus)."
                 />
                 {isFlip && (
                   <StatCard
@@ -798,7 +798,7 @@ export default function App() {
                     <Line
                       type="monotone"
                       dataKey="buyerNetWorth"
-                      name="Buying"
+                      name="Dubai Property"
                       stroke="#f59e0b"
                       strokeWidth={2.5}
                       dot={false}
@@ -807,7 +807,7 @@ export default function App() {
                     <Line
                       type="monotone"
                       dataKey="renterNetWorth"
-                      name="Investing Instead"
+                      name="Alternate Investment"
                       stroke="#38bdf8"
                       strokeWidth={2.5}
                       dot={false}
@@ -818,24 +818,28 @@ export default function App() {
               </div>
               <p className="mt-4 text-xs text-slate-500">
                 {isFlip &&
-                  `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Buyer path is just a generic reinvested portfolio, not a real estate projection. `}
-                Tax calculations are simplified estimates based on standard 2026 primary residence
-                and capital gains laws. Off-plan milestones are estimates.
+                  `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
+                Tax calculations are simplified estimates based on standard 2026 tax rules — Hold
+                exits default to investment-property rates unless marked a Personal Primary
+                Residence (Global Tax Profile). Off-plan milestones, appreciation, and rental
+                income are estimates; the mortgage model assumes one fixed rate for the full term
+                and doesn't enforce real UAE loan-to-value limits. Figures are illustrative
+                projections, not financial advice.
               </p>
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
-              <h3 className="mb-1 text-sm font-semibold text-slate-300">Buyer Net Worth: Equity vs Appreciation</h3>
+              <h3 className="mb-1 text-sm font-semibold text-slate-300">Dubai Property Net Worth: Equity vs Appreciation</h3>
               <p className="mb-4 text-xs text-slate-500">
                 Cost-Basis Equity is what you've actually paid in (mortgage paydown or developer
                 milestones), at the original price. Appreciation Gain is the price-growth portion,
                 net of exit tax and selling costs. Invested Rental Surplus is the landlord's
                 accumulated rental profit — rent collected, net of vacancy, minus the mortgage (or
                 off-plan installment) and carrying costs — reinvested and compounding; it's real,
-                earned income, so it counts too. Together, these three are Buyer Net Worth — the
-                Buying line above.
+                earned income, so it counts too. Together, these three are Dubai Property Net
+                Worth — the Dubai Property line in the chart above.
                 {isOffPlan &&
-                  " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value."}
+                  " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Dubai Property Net Worth, since it's idle capital, not realized property value."}
                 {isFlip &&
                   ' In the flip year itself, the payout is attributed back to Cost-Basis Equity and Appreciation Gain (where it actually came from) rather than shown as cash — only in years after the flip does it become an undifferentiated reinvested portfolio.'}
               </p>

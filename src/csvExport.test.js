@@ -9,7 +9,7 @@ const sampleData = [
 describe('buildCsv', () => {
   it('emits a header row with human-readable column labels', () => {
     const [header] = buildCsv(sampleData).split('\n')
-    expect(header).toBe('Year,Buyer Net Worth (AED),Renter Net Worth (AED),Home Value (AED)')
+    expect(header).toBe('Year,Dubai Property Net Worth (AED),Alternate Investment Net Worth (AED),Home Value (AED)')
   })
 
   it('emits one data row per year, in order', () => {
