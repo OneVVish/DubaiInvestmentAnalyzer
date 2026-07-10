@@ -281,9 +281,17 @@ export function runSimulation(inputs) {
         appreciationGainNet = 0
         cashPortion = flipPortfolio
       } else if (isOffPlan && !handoverDone) {
+        // Full gain, not scaled by how much has been paid to the developer
+        // so far — signing the SPA locks in the original price, so the
+        // contract's worth if exited today is the property's current
+        // market value minus whatever's still owed, same shape as the
+        // Flip and post-handover branches (`cashRealized = v36 -
+        // remainingObligation` = paidToDeveloperSoFar + fullAppreciationGain).
+        // A leveraged figure by design: the less paid in so far, the more
+        // the full gain amplifies the return on actual cash committed.
         const appreciationGain = homeValue - propertyPrice
         costBasisEquity = paidToDeveloper
-        appreciationGainNet = paidToDeveloper * (appreciationGain / propertyPrice)
+        appreciationGainNet = appreciationGain
         cashPortion = buyerPool
         buyerNetWorth = costBasisEquity + appreciationGainNet
       } else {

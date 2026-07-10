@@ -325,6 +325,24 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
     data.forEach(equityPlusAppreciationEqualsNetWorth)
   })
 
+  it('Off-Plan construction: appreciation gain is the FULL gain, not scaled by how much is paid in yet', () => {
+    // The contract locks in the original price at signing — its worth if exited
+    // today is the full current market value minus what's still owed, matching
+    // how the Flip and post-handover branches already work. Regression test for
+    // a bug where this was wrongly multiplied by paidToDeveloper/propertyPrice.
+    const { data } = runSimulation({
+      ...base,
+      propertyPrice: 2500000,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      homeAppreciation: 20,
+    })
+    // Year 1 (month 12): one appreciation step already fired (at month 1).
+    const expectedHomeValue = 2500000 * 1.2
+    expect(data[0].homeValue).toBe(Math.round(expectedHomeValue))
+    expect(data[0].buyerAppreciationGain).toBeCloseTo(expectedHomeValue - 2500000, 0) // full 500,000, not a fraction
+  })
+
   it('Off-Plan Hold, post-handover: equity + appreciation still equal net worth through the Danube phase', () => {
     const { data } = runSimulation({
       ...base,
