@@ -705,10 +705,10 @@ export default function App() {
                 />
                 {isFlip && (
                   <StatCard
-                    label={`Flip CAGR (${flipYear}-yr)`}
+                    label={`Flip IRR (${flipYear}-yr)`}
                     value={flipCAGR != null ? `${(flipCAGR * 100).toFixed(1)}%` : '-'}
                     accentClass="text-emerald-400"
-                    tooltip="Annualized return on only the capital actually paid to the developer by the flip date (not the full price) — a leveraged figure, since the staged payment schedule means part of the price was never at risk."
+                    tooltip="A true internal rate of return, not a simple lump-sum CAGR — it accounts for exactly when each booking fee, installment, and the DLD fee were paid, not just the total invested. Since it's on capital actually paid in (not the full price), it's a leveraged figure — part of the price was never at risk."
                   />
                 )}
               </div>

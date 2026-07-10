@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { runSimulation, calculateMortgagePayment } from './simulation.js'
 import { AED_PER_USD } from './currency.js'
+import { computeAnnualizedIRR } from './irr.js'
 
 const base = {
   propertyPrice: 1000000,
@@ -204,7 +205,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     expect(data[2].buyerNetWorth).toBeCloseTo(cashRealized, 0)
   })
 
-  it('CAGR is annualized over the 3-year hold, on only the capital actually paid in (leveraged)', () => {
+  it('CAGR is a true IRR — exceeds the naive lump-sum CAGR, since staged installments had less time to grow', () => {
     const { data, flipCAGR } = runSimulation({
       ...base,
       homeAppreciation: 10,
@@ -213,9 +214,27 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
       exitStrategy: 'FLIP',
     })
     const investedSoFar = 1000000 - 216666.6666667 // paid in through month 35, excluding the skipped handover milestone
-    const expectedCAGR = (data[2].buyerNetWorth / investedSoFar) ** (1 / 3) - 1
-    expect(flipCAGR).toBeCloseTo(expectedCAGR, 6)
+    const naiveLumpSumCagr = (data[2].buyerNetWorth / investedSoFar) ** (1 / 3) - 1
+    expect(flipCAGR).toBeGreaterThan(naiveLumpSumCagr)
     expect(flipCAGR).toBeGreaterThan(0.1) // sanity: leveraged return exceeds the 10% raw appreciation rate
+  })
+
+  it('CAGR matches an independently-built monthly cash-flow IRR', () => {
+    const { flipCAGR } = runSimulation({
+      ...base,
+      homeAppreciation: 10,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    // Booking (20%) at month 0, then 60%/36 per month through month 35 — Emaar's
+    // shape (see paymentPlans.test.js) — followed by the flip payout at month 36.
+    const monthlyInstallment = (1000000 * 0.6) / 36
+    const cashFlows = [-(1000000 * 0.2), ...Array(35).fill(-monthlyInstallment), null]
+    const v36 = 1000000 * 1.1 ** 3
+    const remainingObligation = 216666.6666667
+    cashFlows[36] = v36 - remainingObligation // tax-free (UAE default), so this is the flip payout in full
+    expect(flipCAGR).toBeCloseTo(computeAnnualizedIRR(cashFlows), 6)
   })
 
   it('flipCAGR is null for a Ready property or an Off-Plan Hold', () => {

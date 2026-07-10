@@ -95,7 +95,7 @@ export default function PrintReport({
           </div>
           {isFlip && (
             <div className="rounded-lg border border-slate-200 p-3">
-              <p className="text-xs text-slate-500">Flip CAGR ({flipYear}-yr)</p>
+              <p className="text-xs text-slate-500">Flip IRR ({flipYear}-yr)</p>
               <p className="text-lg font-bold text-emerald-600">
                 {flipCAGR != null ? `${(flipCAGR * 100).toFixed(1)}%` : '-'}
               </p>

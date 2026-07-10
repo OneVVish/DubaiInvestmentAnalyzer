@@ -2,6 +2,7 @@ import { resolveTaxProfile, getNetStockReturn } from './taxEngine.js'
 import { buildMilestoneSchedule, amountDueInMonth, cumulativePaidByMonth, HANDOVER_MONTH } from './paymentPlans.js'
 import { AED_PER_USD } from './currency.js'
 import { computeAnnualServiceCharges } from './serviceCharges.js'
+import { computeAnnualizedIRR } from './irr.js'
 
 export const YEARS = 30
 export const MONTHS = YEARS * 12
@@ -190,12 +191,25 @@ export function runSimulation(inputs) {
         flipEquityAtFlip = paidToDeveloperSoFar - dldFee
         flipAppreciationAtFlip = profit - flipTax
 
-        // Annualized return on total cash actually committed by handover —
-        // developer milestones plus the DLD fee — not the full price. A
-        // leveraged figure, since the staged schedule means only part of the
-        // price was ever at risk for the 3-year hold.
-        const investedSoFar = paidToDeveloperSoFar + dldFee
-        flipCAGR = investedSoFar > 0 ? (flipPortfolio / investedSoFar) ** (1 / 3) - 1 : null
+        // Annualized return on invested capital, accounting for exactly
+        // when each dollar went in — a true IRR, not a simple CAGR on the
+        // total paid in. The booking fee and DLD fee land at month 0, then
+        // one milestone outflow per month through month 35 (the schedule
+        // already covers month 0 too), then the flip payout at month 36
+        // (replacing that month's skipped milestone). A simple lump-sum
+        // CAGR would understate this, since it treats every payment as if
+        // it had the full 3 years to grow, when later installments really
+        // only had a few months.
+        const monthlyCashFlows = []
+        for (let m = 0; m <= HANDOVER_MONTH; m++) {
+          if (m === HANDOVER_MONTH) {
+            monthlyCashFlows.push(flipPortfolio)
+          } else {
+            const due = amountDueInMonth(schedule, m)
+            monthlyCashFlows.push(m === 0 ? -(due + dldFee) : -due)
+          }
+        }
+        flipCAGR = computeAnnualizedIRR(monthlyCashFlows)
       } else {
         const milestoneDue = amountDueInMonth(schedule, month)
         buyerPool = buyerPool * (1 + monthlyNetStockReturn) - milestoneDue
