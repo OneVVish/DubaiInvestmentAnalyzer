@@ -1,0 +1,193 @@
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import { formatCurrency } from './format.js'
+import { PAYMENT_PLANS } from './paymentPlans.js'
+
+const CITIZENSHIP_LABELS = { USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', 'UAE/Other': 'UAE / Other' }
+const RESIDENCE_LABELS = { UAE: 'UAE', USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', Other: 'Other' }
+
+function InputRow({ label, value }) {
+  return (
+    <div className="flex justify-between border-b border-slate-200 py-1.5 text-sm">
+      <span className="text-slate-600">{label}</span>
+      <span className="font-medium text-slate-900">{value}</span>
+    </div>
+  )
+}
+
+export default function PrintReport({
+  inputs,
+  data,
+  mortgagePayment,
+  downPayment,
+  breakEvenYear,
+  finalYear,
+  displayCurrency,
+  effectiveAppreciation,
+}) {
+  const buyerWinsAt30 = finalYear && finalYear.buyerNetWorth > finalYear.renterNetWorth
+  const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
+  const isOffPlan = inputs.propertyStatus === 'OFFPLAN'
+  const generatedOn = new Date().toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+
+  return (
+    <div className="print-only bg-white p-10 text-slate-900">
+      <header className="mb-6 border-b-2 border-slate-900 pb-4">
+        <h1 className="text-2xl font-bold">Dubai Real Estate Opportunity Cost Report</h1>
+        <p className="mt-1 text-sm text-slate-500">Generated {generatedOn}</p>
+      </header>
+
+      <section className="mb-6">
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Bottom Line</h2>
+        <p className="mb-3 text-base">
+          {breakEvenYear
+            ? `Buying overtakes investing the same capital in year ${breakEvenYear}.`
+            : 'Over 30 years, investing the same capital beats buying in this scenario.'}
+        </p>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="text-xs text-slate-500">Mortgage (P&amp;I) / mo</p>
+            <p className="text-lg font-bold">{mortgagePayment > 0 ? fmt(mortgagePayment, false) : 'N/A (Off-Plan)'}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="text-xs text-slate-500">Buyer Net Worth (Yr 30)</p>
+            <p className={`text-lg font-bold ${buyerWinsAt30 ? 'text-amber-600' : ''}`}>
+              {finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3">
+            <p className="text-xs text-slate-500">Renter Net Worth (Yr 30)</p>
+            <p className={`text-lg font-bold ${!buyerWinsAt30 ? 'text-sky-600' : ''}`}>
+              {finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6" style={{ breakInside: 'avoid' }}>
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+          30-Year Net Worth Projection
+        </h2>
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="year" stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
+              <YAxis
+                stroke="#475569"
+                tick={{ fill: '#475569', fontSize: 11 }}
+                tickFormatter={(v) => fmt(v)}
+                width={65}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {breakEvenYear && (
+                <ReferenceLine x={breakEvenYear} stroke="#f59e0b" strokeDasharray="4 4" />
+              )}
+              <Line
+                type="monotone"
+                dataKey="buyerNetWorth"
+                name="Buying"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="renterNetWorth"
+                name="Investing Instead"
+                stroke="#0284c7"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section className="mb-6 grid grid-cols-2 gap-x-10" style={{ breakInside: 'avoid' }}>
+        <div>
+          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">The Property</h2>
+          <InputRow label="Property Price" value={fmt(inputs.propertyPrice, false)} />
+          <InputRow label="Monthly Rent (comparable)" value={fmt(inputs.monthlyRent, false)} />
+          <InputRow label="Asset Class" value={inputs.assetClass === 'CONDO' ? 'Condo' : 'Townhouse / Villa'} />
+          <InputRow label="Near Metro Blue Line Expansion" value={inputs.nearMetro ? 'Yes' : 'No'} />
+          <InputRow label="Near Al Maktoum Airport Expansion" value={inputs.nearAirport ? 'Yes' : 'No'} />
+          <InputRow label="Property Status" value={isOffPlan ? 'Off-Plan' : 'Ready'} />
+          {isOffPlan && (
+            <>
+              <InputRow label="Developer Payment Plan" value={PAYMENT_PLANS[inputs.developerPlan]?.label ?? '-'} />
+              <InputRow
+                label="Exit Strategy"
+                value={inputs.exitStrategy === 'FLIP' ? 'Flip Before Handover' : 'Hold Long Term'}
+              />
+            </>
+          )}
+
+          <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">
+            {isOffPlan ? 'Purchase' : 'Financing'}
+          </h2>
+          {isOffPlan ? (
+            <InputRow label="Booking Fee (Month 0)" value={`20% (${fmt(downPayment, false)})`} />
+          ) : (
+            <>
+              <InputRow label="Down Payment" value={`${inputs.downPaymentPct}% (${fmt(downPayment, false)})`} />
+              <InputRow label="Mortgage Rate" value={`${inputs.mortgageRate.toFixed(1)}%`} />
+              <InputRow label="Mortgage Term" value={`${inputs.mortgageTermYears} yrs`} />
+            </>
+          )}
+
+          <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">
+            Homeownership Costs
+          </h2>
+          <InputRow label="Monthly Service Charges" value={fmt(inputs.monthlyServiceCharges, false)} />
+          <InputRow label="Annual Home Insurance" value={fmt(inputs.homeInsuranceAnnual, false)} />
+          <InputRow label="Yearly Maintenance" value={fmt(inputs.yearlyMaintenance, false)} />
+          <InputRow label="Cost Inflation" value={`${inputs.costInflation.toFixed(1)}%`} />
+          <InputRow label="Selling Costs" value={`${inputs.sellingCostPct.toFixed(1)}%`} />
+        </div>
+
+        <div>
+          <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Market Assumptions</h2>
+          <InputRow label="Base Home Appreciation" value={`${inputs.homeAppreciation.toFixed(1)}%`} />
+          <InputRow label="Effective Appreciation Rate" value={`${effectiveAppreciation.toFixed(1)}%`} />
+          <InputRow label="Rental Yield" value={`${inputs.rentalYield.toFixed(1)}%`} />
+          <InputRow label="Rent Inflation" value={`${inputs.rentInflation.toFixed(1)}%`} />
+          <InputRow label="Expected Stock Market Return (gross)" value={`${inputs.stockReturn.toFixed(1)}%`} />
+
+          <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">
+            Global Tax Profile
+          </h2>
+          <InputRow label="Citizenship" value={CITIZENSHIP_LABELS[inputs.citizenship] ?? inputs.citizenship} />
+          <InputRow label="Tax Residence" value={RESIDENCE_LABELS[inputs.taxResidence] ?? inputs.taxResidence} />
+
+          <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">
+            Local Dubai Taxes
+          </h2>
+          <InputRow label="Property Tax" value="0%" />
+          <InputRow label="Capital Gains Tax" value="0%" />
+          <InputRow label="Rental / Personal Income Tax" value="0%" />
+        </div>
+      </section>
+
+      <footer className="border-t border-slate-200 pt-3 text-xs text-slate-400">
+        Tax calculations are simplified estimates based on standard 2026 primary residence and
+        capital gains laws. Off-plan milestones are estimates. Figures are illustrative
+        projections, not financial advice.
+      </footer>
+    </div>
+  )
+}

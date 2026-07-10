@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  color-scheme: dark;
+}
+
+/* Slim, styled range sliders (WebKit + Firefox) */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--track-color, #6366f1) 0%,
+    var(--track-color, #6366f1) var(--track-fill, 50%),
+    #334155 var(--track-fill, 50%),
+    #334155 100%
+  );
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 3px solid var(--track-color, #6366f1);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 3px solid var(--track-color, #6366f1);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+input[type='range']::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: #334155;
+}
+
+input[type='range']::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--track-color, #6366f1);
+}
+
+/* The PDF report is kept in normal (non-display:none) layout at all times, just
+   positioned off-screen, so Recharts' ResizeObserver-based charts always have
+   real dimensions to measure and render against — display:none would give them
+   a 0x0 box that some browsers fail to properly re-measure once print starts. */
+.print-only {
+  position: absolute;
+  top: 0;
+  left: -9999px;
+  width: 800px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    position: static;
+    left: auto;
+    width: auto;
+  }
+  body,
+  .min-h-screen {
+    background: #ffffff !important;
+    min-height: 0 !important;
+  }
+}

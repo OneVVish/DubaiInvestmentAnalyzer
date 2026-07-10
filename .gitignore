@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+
+# Generated on this machine against an internal corporate npm registry mirror;
+# its "resolved" tarball URLs aren't reachable outside that network (breaks CI
+# and anyone else installing this repo). Let each environment resolve its own.
+package-lock.json
