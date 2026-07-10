@@ -97,7 +97,7 @@ export function runSimulation(inputs) {
     rentInflation,
     vacancyRatePct,
     propertyStatus, // 'READY' | 'OFFPLAN'
-    developerPlan, // 'EMAAR' | 'DAMAC' | 'DANUBE' — off-plan only
+    developerPlan, // 'EMAAR' | 'DAMAC' | 'BALANCED_5050' | 'AGGRESSIVE_4060' | 'DANUBE' | 'DANUBE_CLASSIC' — off-plan only
     exitStrategy, // 'HOLD' | 'FLIP' — off-plan only
     downPaymentPct, // Ready only
     mortgageRate, // Ready only

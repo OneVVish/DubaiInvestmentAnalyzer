@@ -162,26 +162,59 @@ describe('runSimulation — Off-plan, Hold', () => {
     expect(data[2].renterNetWorth).toBe(1000000)
   })
 
-  it('Damac: only 60% paid at handover (year 3) — the 40% back-end now spreads over the 24 months after', () => {
+  it('Damac: fully paid off and worth exactly the property price at handover (year 3), same shape as Emaar', () => {
     const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DAMAC' })
-    expect(data[2].buyerNetWorth).toBe(600000)
-    expect(data[2].buyerCashPortion).toBeCloseTo(400000, 0) // still tracked, just not counted
+    expect(data[2].buyerNetWorth).toBe(1000000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(0, 0)
   })
 
-  it('Damac: fully paid off by month 60 (year 5), once its post-handover installments finish', () => {
-    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DAMAC' })
-    expect(data[4].buyerNetWorth).toBe(1000000) // year 5 = month 60
-    expect(data[4].buyerCashPortion).toBeCloseTo(0, 0)
+  it('Balanced 50/50: only 50% paid at handover (year 3) — the 50% back-end spreads over the 36 months after', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'BALANCED_5050' })
+    expect(data[2].buyerNetWorth).toBe(500000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(500000, 0) // still tracked, just not counted
   })
 
-  it('Danube: still owes 54% at handover (10% booking + 36% by month 36), so net worth is only the 46% actually paid in', () => {
+  it('Balanced 50/50: fully paid off by month 72 (year 6), once its post-handover installments finish', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'BALANCED_5050' })
+    expect(data[5].buyerNetWorth).toBe(1000000) // year 6 = month 72
+    expect(data[5].buyerCashPortion).toBeCloseTo(0, 0)
+  })
+
+  it('Aggressive 40/60: only 40% paid at handover (year 3) — the 60% back-end spreads over the 60 months after', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'AGGRESSIVE_4060' })
+    expect(data[2].buyerNetWorth).toBe(400000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(600000, 0) // still tracked, just not counted
+  })
+
+  it('Aggressive 40/60: fully paid off by month 96 (year 8), once its post-handover installments finish', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'AGGRESSIVE_4060' })
+    expect(data[7].buyerNetWorth).toBe(1000000) // year 8 = month 96
+    expect(data[7].buyerCashPortion).toBeCloseTo(0, 0)
+  })
+
+  it('Danube: still owes 44% at handover (20% booking + 36% by month 36), so net worth is only the 56% actually paid in', () => {
     const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
+    expect(data[2].buyerNetWorth).toBe(560000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(440000, 0) // still tracked, just not counted
+  })
+
+  it('Danube: fully paid off by month 80, with no float left over once the last installment lands', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
+    // Fully paid off by month 80 (20% booking + 80 months of 1%) -> cost-basis equity reaches
+    // the full 1,000,000 with 0% appreciation, 0% rent (base). No imputed rental credit is added
+    // to the float anymore, so it exactly zeroes out once the installments end.
+    expect(data[6].buyerNetWorth).toBe(1000000) // year 7 = month 84, 4 months after month 80 payoff
+    expect(data[6].buyerCashPortion).toBeCloseTo(0, 0)
+  })
+
+  it('Danube Classic: still owes 54% at handover (10% booking + 36% by month 36), so net worth is only the 46% actually paid in', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE_CLASSIC' })
     expect(data[2].buyerNetWorth).toBe(460000)
     expect(data[2].buyerCashPortion).toBeCloseTo(540000, 0) // still tracked, just not counted
   })
 
-  it('Danube: fully paid off by month 90, with no float left over once the last installment lands', () => {
-    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
+  it('Danube Classic: fully paid off by month 90, with no float left over once the last installment lands', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE_CLASSIC' })
     // Fully paid off by month 90 (10% booking + 90 months of 1%) -> cost-basis equity reaches
     // the full 1,000,000 with 0% appreciation, 0% rent (base). No imputed rental credit is added
     // to the float anymore, so it exactly zeroes out once the installments end.
