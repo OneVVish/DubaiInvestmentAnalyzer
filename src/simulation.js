@@ -1,11 +1,13 @@
 import { resolveTaxProfile, getNetStockReturn } from './taxEngine.js'
 import { buildMilestoneSchedule, amountDueInMonth, cumulativePaidByMonth, HANDOVER_MONTH } from './paymentPlans.js'
 import { AED_PER_USD } from './currency.js'
+import { computeAnnualServiceCharges } from './serviceCharges.js'
 
 export const YEARS = 30
 export const MONTHS = YEARS * 12
 
 export const ASSET_CLASS_APPRECIATION_DEFAULTS = { CONDO: 11, VILLA: 20 }
+export const ASSET_CLASS_SIZE_DEFAULTS = { CONDO: 1200, VILLA: 3500 }
 export const METRO_BONUS_PCT = 1.5
 export const AIRPORT_BONUS_PCT = 2.5
 
@@ -59,11 +61,14 @@ export function runSimulation(inputs) {
     downPaymentPct, // Ready only
     mortgageRate, // Ready only
     mortgageTermYears, // Ready only
-    monthlyServiceCharges,
+    propertySizeSqft,
+    serviceChargeRate,
     homeInsuranceAnnual,
     yearlyMaintenance,
     costInflation,
     sellingCostPct,
+    dldFeePct,
+    dldWaiverPct, // 0, 50, or 100 — a developer promotion covering part/all of the fee
     stockReturn,
     citizenship,
     taxResidence,
@@ -90,22 +95,37 @@ export function runSimulation(inputs) {
   const mortgagePayment =
     !isOffPlan && loanAmount > 0 ? calculateMortgagePayment(loanAmount, mortgageRate, mortgageTermYears * 12) : 0
 
+  // DLD (Dubai Land Department) transfer fee — paid once, at booking (month
+  // 0), for both Ready and Off-Plan (off-plan registers it upfront via
+  // Oqood, not at handover). `dldWaiverPct` models a developer promotion
+  // that covers part or all of it (a common Dubai sales incentive).
+  const effectiveDldFeePct = dldFeePct * (1 - dldWaiverPct / 100)
+  const dldFee = propertyPrice * (effectiveDldFeePct / 100)
+
   let homeValue = propertyPrice
   let loanBalance = loanAmount
   let rent = monthlyRent
-  let serviceCharges = monthlyServiceCharges
+  // Community × size drives the actual charge, not a flat guess — see
+  // serviceCharges.js (rates sourced from a Dubai service-charges guide).
+  let serviceCharges = computeAnnualServiceCharges(propertySizeSqft, serviceChargeRate) / 12
   let insurance = homeInsuranceAnnual
   let maintenance = yearlyMaintenance
 
-  let renterPortfolio = downPayment
+  // The Buyer pays the DLD fee at booking (month 0), in both cases, so the
+  // Renter's matching starting capital includes it from day one too.
+  let renterPortfolio = downPayment + dldFee
 
   // Off-plan only: the not-yet-paid capital sitting in stocks, compounding,
-  // drawn down as milestones (and, during construction, rent) come due.
-  let buyerPool = isOffPlan ? propertyPrice - downPayment : 0
+  // drawn down as milestones (and, during construction, rent) come due. The
+  // DLD fee is drawn from this same pool immediately, on top of the booking
+  // payment — it's the buyer's own cash, not part of what's owed to the
+  // developer.
+  let buyerPool = isOffPlan ? propertyPrice - downPayment - dldFee : 0
   let paidToDeveloper = isOffPlan ? downPayment : propertyPrice
   let handoverDone = false
   let flipExecuted = false
   let flipPortfolio = 0
+  let flipCAGR = null
 
   const data = []
 
@@ -137,13 +157,24 @@ export function runSimulation(inputs) {
         // (not whatever the iterative `homeValue` happens to read at this
         // exact month) since it's independently specified.
         const v36 = propertyPrice * (1 + effectiveAppreciation / 100) ** 3
-        const remainingObligation = propertyPrice - cumulativePaidByMonth(schedule, HANDOVER_MONTH - 1)
+        const paidToDeveloperSoFar = cumulativePaidByMonth(schedule, HANDOVER_MONTH - 1)
+        const remainingObligation = propertyPrice - paidToDeveloperSoFar
         const cashRealized = v36 - remainingObligation
         const profit = v36 - propertyPrice
         const flipTax = computeFlipExitTax(profit, taxProfile)
-        flipPortfolio = cashRealized - flipTax
+        // The DLD fee was already paid at booking regardless of what happens
+        // at handover — it doesn't come back just because the buyer flips
+        // instead of taking title.
+        flipPortfolio = cashRealized - flipTax - dldFee
         flipExecuted = true
         buyerCostThisMonth = 0 // no rent/milestone this month — the sale replaces it
+
+        // Annualized return on total cash actually committed by handover —
+        // developer milestones plus the DLD fee — not the full price. A
+        // leveraged figure, since the staged schedule means only part of the
+        // price was ever at risk for the 3-year hold.
+        const investedSoFar = paidToDeveloperSoFar + dldFee
+        flipCAGR = investedSoFar > 0 ? (flipPortfolio / investedSoFar) ** (1 / 3) - 1 : null
       } else {
         const milestoneDue = amountDueInMonth(schedule, month)
         buyerPool = buyerPool * (1 + monthlyNetStockReturn) - milestoneDue
@@ -224,5 +255,6 @@ export function runSimulation(inputs) {
     mortgagePayment,
     downPayment,
     breakEvenYear: breakEvenPoint ? breakEvenPoint.year : null,
+    flipCAGR,
   }
 }

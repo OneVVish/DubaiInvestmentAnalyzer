@@ -10,6 +10,8 @@ import {
 } from 'recharts'
 import { formatCurrency } from './format.js'
 import { PAYMENT_PLANS } from './paymentPlans.js'
+import { COMMUNITIES } from './communities.js'
+import { computeAnnualServiceCharges } from './serviceCharges.js'
 
 const CITIZENSHIP_LABELS = { USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', 'UAE/Other': 'UAE / Other' }
 const RESIDENCE_LABELS = { UAE: 'UAE', USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', Other: 'Other' }
@@ -32,6 +34,10 @@ export default function PrintReport({
   finalYear,
   displayCurrency,
   effectiveAppreciation,
+  flipCAGR,
+  isFlip,
+  flipYear,
+  offPlanMonthlyInstallment,
 }) {
   const buyerWinsAt30 = finalYear && finalYear.buyerNetWorth > finalYear.renterNetWorth
   const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
@@ -52,33 +58,53 @@ export default function PrintReport({
       <section className="mb-6">
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Bottom Line</h2>
         <p className="mb-3 text-base">
-          {breakEvenYear
-            ? `Buying overtakes investing the same capital in year ${breakEvenYear}.`
-            : 'Over 30 years, investing the same capital beats buying in this scenario.'}
+          {isFlip
+            ? breakEvenYear
+              ? `Buying overtakes investing the same capital by the flip, in year ${breakEvenYear}.`
+              : `Investing the same capital still beats buying at the flip (year ${flipYear}).`
+            : breakEvenYear
+              ? `Buying overtakes investing the same capital in year ${breakEvenYear}.`
+              : 'Over 30 years, investing the same capital beats buying in this scenario.'}
         </p>
-        <div className="grid grid-cols-3 gap-4">
+        <div className={`grid gap-4 ${isFlip ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <div className="rounded-lg border border-slate-200 p-3">
-            <p className="text-xs text-slate-500">Mortgage (P&amp;I) / mo</p>
-            <p className="text-lg font-bold">{mortgagePayment > 0 ? fmt(mortgagePayment, false) : 'N/A (Off-Plan)'}</p>
+            <p className="text-xs text-slate-500">
+              {isOffPlan ? 'Installment / mo (Construction)' : 'Mortgage (P&amp;I) / mo'}
+            </p>
+            <p className="text-lg font-bold">
+              {isOffPlan ? fmt(offPlanMonthlyInstallment, false) : mortgagePayment > 0 ? fmt(mortgagePayment, false) : 'N/A'}
+            </p>
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
-            <p className="text-xs text-slate-500">Buyer Net Worth (Yr 30)</p>
+            <p className="text-xs text-slate-500">
+              {isFlip ? `Buyer Net Worth (at Flip, Yr ${flipYear})` : 'Buyer Net Worth (Yr 30)'}
+            </p>
             <p className={`text-lg font-bold ${buyerWinsAt30 ? 'text-amber-600' : ''}`}>
               {finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
             </p>
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
-            <p className="text-xs text-slate-500">Renter Net Worth (Yr 30)</p>
+            <p className="text-xs text-slate-500">
+              {isFlip ? `Renter Net Worth (at Flip, Yr ${flipYear})` : 'Renter Net Worth (Yr 30)'}
+            </p>
             <p className={`text-lg font-bold ${!buyerWinsAt30 ? 'text-sky-600' : ''}`}>
               {finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
             </p>
           </div>
+          {isFlip && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <p className="text-xs text-slate-500">Flip CAGR ({flipYear}-yr)</p>
+              <p className="text-lg font-bold text-emerald-600">
+                {flipCAGR != null ? `${(flipCAGR * 100).toFixed(1)}%` : '-'}
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
       <section className="mb-6" style={{ breakInside: 'avoid' }}>
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
-          30-Year Net Worth Projection
+          {isFlip ? `Net Worth Projection Through the Flip (Year ${flipYear})` : '30-Year Net Worth Projection'}
         </h2>
         <div className="h-[280px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -153,11 +179,22 @@ export default function PrintReport({
           <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">
             Homeownership Costs
           </h2>
-          <InputRow label="Monthly Service Charges" value={fmt(inputs.monthlyServiceCharges, false)} />
+          <InputRow label="Community" value={COMMUNITIES.find((c) => c.key === inputs.community)?.label ?? '-'} />
+          <InputRow label="Property Size" value={`${inputs.propertySizeSqft.toLocaleString()} sq ft`} />
+          <InputRow label="Service Charge Rate" value={`${inputs.serviceChargeRate.toFixed(1)} AED/sq ft/yr`} />
+          <InputRow
+            label="Annual Service Charges"
+            value={fmt(computeAnnualServiceCharges(inputs.propertySizeSqft, inputs.serviceChargeRate), false)}
+          />
           <InputRow label="Annual Home Insurance" value={fmt(inputs.homeInsuranceAnnual, false)} />
           <InputRow label="Yearly Maintenance" value={fmt(inputs.yearlyMaintenance, false)} />
           <InputRow label="Cost Inflation" value={`${inputs.costInflation.toFixed(1)}%`} />
           <InputRow label="Selling Costs" value={`${inputs.sellingCostPct.toFixed(1)}%`} />
+          <InputRow label="DLD Transfer Fee" value={`${inputs.dldFeePct.toFixed(1)}%`} />
+          <InputRow
+            label="DLD Fee Waiver"
+            value={inputs.dldWaiverPct > 0 ? `${inputs.dldWaiverPct}%` : 'None'}
+          />
         </div>
 
         <div>
@@ -184,6 +221,8 @@ export default function PrintReport({
       </section>
 
       <footer className="border-t border-slate-200 pt-3 text-xs text-slate-400">
+        {isFlip &&
+          `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Buyer path is just a generic reinvested portfolio, not a real estate projection. `}
         Tax calculations are simplified estimates based on standard 2026 primary residence and
         capital gains laws. Off-plan milestones are estimates. Figures are illustrative
         projections, not financial advice.

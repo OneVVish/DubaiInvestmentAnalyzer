@@ -17,11 +17,14 @@ const base = {
   downPaymentPct: 100,
   mortgageRate: 5,
   mortgageTermYears: 25,
-  monthlyServiceCharges: 0,
+  propertySizeSqft: 1000,
+  serviceChargeRate: 0,
   homeInsuranceAnnual: 0,
   yearlyMaintenance: 0,
   costInflation: 0,
   sellingCostPct: 0,
+  dldFeePct: 0,
+  dldWaiverPct: 0,
   stockReturn: 0,
   citizenship: 'UAE/Other',
   taxResidence: 'UAE',
@@ -38,6 +41,17 @@ describe('runSimulation — Ready property', () => {
     const { data } = runSimulation(base)
     expect(data[0]).toMatchObject({ year: 1, buyerNetWorth: 1000000, renterNetWorth: 1000000, homeValue: 1000000 })
     expect(data[29]).toMatchObject({ year: 30, buyerNetWorth: 1000000, renterNetWorth: 1000000 })
+  })
+
+  it('service charges are size x rate — an ongoing Buyer carrying cost, mirrored as Renter contributions', () => {
+    const noCharges = runSimulation(base)
+    const withCharges = runSimulation({ ...base, propertySizeSqft: 1200, serviceChargeRate: 16 }) // Dubai Marina rate
+    const annualCharge = 1200 * 16
+    // Carrying costs don't directly reduce the Buyer's home-equity net worth (same as
+    // mortgage/insurance/maintenance already work) — they flow through as Renter
+    // contributions instead, same delta mechanic used throughout.
+    expect(withCharges.data[0].buyerNetWorth).toBe(noCharges.data[0].buyerNetWorth)
+    expect(withCharges.data[0].renterNetWorth - noCharges.data[0].renterNetWorth).toBeCloseTo(annualCharge, 0)
   })
 
   it('a UAE tax-free profile owes no exit tax on a large gain', () => {
@@ -96,6 +110,77 @@ describe('runSimulation — Off-plan, Hold', () => {
   })
 })
 
+describe('runSimulation — DLD transfer fee', () => {
+  it('Ready: paid at month 0, so both paths lose exactly the fee amount at 0% rates', () => {
+    const { data } = runSimulation({ ...base, dldFeePct: 4 })
+    // Buyer: home is worth exactly the price, fee doesn't touch home equity -> stays at 1,000,000.
+    // Renter: starts with downPayment + fee, no growth/rent -> stays at 1,000,000 + fee.
+    expect(data[0].buyerNetWorth).toBe(1000000)
+    expect(data[0].renterNetWorth).toBe(1040000)
+  })
+
+  it('Off-Plan Hold: also charged at booking (month 0) — even year 1, before handover, differs', () => {
+    const withFee = runSimulation({ ...base, propertyStatus: 'OFFPLAN', dldFeePct: 4 })
+    const noFee = runSimulation({ ...base, propertyStatus: 'OFFPLAN', dldFeePct: 0 })
+    // Buyer's float is drawn down by the fee immediately, so year 1 already reflects it;
+    // the Renter's matching contribution also lands at month 0, same parity as Ready.
+    expect(noFee.data[0].buyerNetWorth - withFee.data[0].buyerNetWorth).toBeCloseTo(40000, 0)
+    expect(withFee.data[0].renterNetWorth - noFee.data[0].renterNetWorth).toBeCloseTo(40000, 0)
+  })
+
+  it('Off-Plan Flip: still charged — it was already paid at booking, before the flip decision', () => {
+    const withFee = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      exitStrategy: 'FLIP',
+      homeAppreciation: 10,
+      dldFeePct: 4,
+    })
+    const noFee = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      exitStrategy: 'FLIP',
+      homeAppreciation: 10,
+      dldFeePct: 0,
+    })
+    expect(noFee.data[2].buyerNetWorth - withFee.data[2].buyerNetWorth).toBeCloseTo(40000, 0)
+  })
+
+  it('a 50% waiver halves the effective fee', () => {
+    const full = runSimulation({ ...base, dldFeePct: 4, dldWaiverPct: 0 })
+    const halved = runSimulation({ ...base, dldFeePct: 4, dldWaiverPct: 50 })
+    const none = runSimulation({ ...base, dldFeePct: 4, dldWaiverPct: 100 })
+    expect(full.data[0].renterNetWorth - halved.data[0].renterNetWorth).toBeCloseTo(20000, 0) // half of 40,000
+    expect(halved.data[0].renterNetWorth - none.data[0].renterNetWorth).toBeCloseTo(20000, 0)
+  })
+
+  it('a 100% waiver is identical to no fee at all', () => {
+    const waived = runSimulation({ ...base, dldFeePct: 4, dldWaiverPct: 100 })
+    const noFee = runSimulation({ ...base, dldFeePct: 0, dldWaiverPct: 0 })
+    expect(waived.data[0]).toEqual(noFee.data[0])
+  })
+
+  it('a waiver also reduces what the flipper already sunk into the fee', () => {
+    const full = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      exitStrategy: 'FLIP',
+      homeAppreciation: 10,
+      dldFeePct: 4,
+      dldWaiverPct: 0,
+    })
+    const waived = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      exitStrategy: 'FLIP',
+      homeAppreciation: 10,
+      dldFeePct: 4,
+      dldWaiverPct: 100,
+    })
+    expect(waived.data[2].buyerNetWorth - full.data[2].buyerNetWorth).toBeCloseTo(40000, 0)
+  })
+})
+
 describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('matches the spec formulas for V36, cashRealized, and profit (tax-free)', () => {
     const { data } = runSimulation({
@@ -109,6 +194,25 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     const remainingObligation = 216666.6666667 // Emaar's month-36 due amount (20% lump + last installment)
     const cashRealized = v36 - remainingObligation
     expect(data[2].buyerNetWorth).toBeCloseTo(cashRealized, 0)
+  })
+
+  it('CAGR is annualized over the 3-year hold, on only the capital actually paid in (leveraged)', () => {
+    const { data, flipCAGR } = runSimulation({
+      ...base,
+      homeAppreciation: 10,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    const investedSoFar = 1000000 - 216666.6666667 // paid in through month 35, excluding the skipped handover milestone
+    const expectedCAGR = (data[2].buyerNetWorth / investedSoFar) ** (1 / 3) - 1
+    expect(flipCAGR).toBeCloseTo(expectedCAGR, 6)
+    expect(flipCAGR).toBeGreaterThan(0.1) // sanity: leveraged return exceeds the 10% raw appreciation rate
+  })
+
+  it('flipCAGR is null for a Ready property or an Off-Plan Hold', () => {
+    expect(runSimulation(base).flipCAGR).toBeNull()
+    expect(runSimulation({ ...base, propertyStatus: 'OFFPLAN', exitStrategy: 'HOLD' }).flipCAGR).toBeNull()
   })
 
   it('a flipped contract loses its primary-residence exemption — US flat 15%, no $250K exemption', () => {

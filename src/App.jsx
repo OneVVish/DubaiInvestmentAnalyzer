@@ -13,13 +13,17 @@ import {
 import { Check, Download, Info, Printer, RotateCcw, Save, Share2 } from 'lucide-react'
 import {
   ASSET_CLASS_APPRECIATION_DEFAULTS,
+  ASSET_CLASS_SIZE_DEFAULTS,
   AIRPORT_BONUS_PCT,
   METRO_BONUS_PCT,
   getEffectiveAppreciation,
   runSimulation,
 } from './simulation.js'
 import { CITIZENSHIP_OPTIONS, RESIDENCE_OPTIONS } from './taxEngine.js'
-import { PAYMENT_PLANS } from './paymentPlans.js'
+import { HANDOVER_MONTH, PAYMENT_PLANS, amountDueInMonth, buildMilestoneSchedule } from './paymentPlans.js'
+import { COMMUNITIES } from './communities.js'
+import { computeAnnualServiceCharges, getServiceChargeRate } from './serviceCharges.js'
+import { DUBAI_AVERAGE_YIELD_PCT, computeGrossYieldPct, getRentalYield } from './rentalYield.js'
 import { CURRENCIES } from './currency.js'
 import { formatCurrency } from './format.js'
 import { buildShareUrl, getStateFromUrl } from './shareState.js'
@@ -152,7 +156,7 @@ const DEFAULT_INPUTS = {
   propertyPrice: 1500000,
   monthlyRent: 8750,
   rentInflation: 5,
-  rentalYield: 7,
+  rentalYield: getRentalYield('MARINA', 'CONDO') ?? DUBAI_AVERAGE_YIELD_PCT,
   assetClass: 'CONDO',
   nearMetro: false,
   nearAirport: false,
@@ -163,11 +167,15 @@ const DEFAULT_INPUTS = {
   downPaymentPct: 25,
   mortgageRate: 4.5,
   mortgageTermYears: 25,
-  monthlyServiceCharges: 500,
+  community: 'MARINA',
+  propertySizeSqft: ASSET_CLASS_SIZE_DEFAULTS.CONDO,
+  serviceChargeRate: getServiceChargeRate('MARINA'),
   homeInsuranceAnnual: 1500,
   yearlyMaintenance: 5000,
   costInflation: 3,
   sellingCostPct: 2,
+  dldFeePct: 4,
+  dldWaiverPct: 0,
   stockReturn: 7,
   citizenship: 'UAE/Other',
   taxResidence: 'UAE',
@@ -188,11 +196,60 @@ export default function App() {
   const setField = (key) => (value) => setInputs((prev) => ({ ...prev, [key]: value }))
 
   const handleAssetClassChange = (assetClass) =>
-    setInputs((prev) => ({ ...prev, assetClass, homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[assetClass] }))
+    setInputs((prev) => {
+      const yieldPct = getRentalYield(prev.community, assetClass)
+      return {
+        ...prev,
+        assetClass,
+        homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[assetClass],
+        propertySizeSqft: ASSET_CLASS_SIZE_DEFAULTS[assetClass],
+        ...(yieldPct != null ? { rentalYield: yieldPct } : {}),
+      }
+    })
 
-  const { data, mortgagePayment, downPayment, breakEvenYear } = useMemo(() => runSimulation(inputs), [inputs])
-  const finalYear = data[data.length - 1]
+  const handleCommunityChange = (community) =>
+    setInputs((prev) => {
+      const rate = getServiceChargeRate(community)
+      const yieldPct = getRentalYield(community, prev.assetClass)
+      return {
+        ...prev,
+        community,
+        ...(rate != null ? { serviceChargeRate: rate } : {}),
+        ...(yieldPct != null ? { rentalYield: yieldPct } : {}),
+      }
+    })
+
+  const { data, mortgagePayment, downPayment, breakEvenYear, flipCAGR } = useMemo(
+    () => runSimulation(inputs),
+    [inputs],
+  )
   const effectiveAppreciation = getEffectiveAppreciation(inputs)
+  const isOffPlan = inputs.propertyStatus === 'OFFPLAN'
+  const isFlip = isOffPlan && inputs.exitStrategy === 'FLIP'
+  const flipYear = HANDOVER_MONTH / 12
+
+  // Off-plan has no mortgage, but it does have a real recurring monthly
+  // obligation — the regular construction-period installment (excludes the
+  // 20% booking fee and any handover-time lump sum). Danube's continues
+  // through month 80; shown here as a representative "during construction"
+  // figure. Recomputed here purely for display — simulation.js builds its
+  // own copy of this schedule internally.
+  const offPlanMonthlyInstallment = useMemo(() => {
+    if (!isOffPlan) return null
+    const schedule = buildMilestoneSchedule(inputs.developerPlan, inputs.propertyPrice)
+    return amountDueInMonth(schedule, 1)
+  }, [isOffPlan, inputs.developerPlan, inputs.propertyPrice])
+
+  // A flipped contract's story is over at handover — the buyer no longer
+  // tracks home equity or rent past that point (see simulation.js), so the
+  // remaining ~27 years are just generic compounding, not property-specific.
+  // Truncate everything shown to the user at the flip point instead of
+  // implying 30 years of real estate insight that isn't there.
+  const chartData = isFlip ? data.slice(0, flipYear) : data
+  const finalYear = chartData[chartData.length - 1]
+  const displayBreakEvenYear = isFlip
+    ? chartData.find((d) => d.buyerNetWorth > d.renterNetWorth)?.year ?? null
+    : breakEvenYear
 
   const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
 
@@ -329,6 +386,7 @@ export default function App() {
                 max={100000}
                 step={250}
                 format={(v) => fmt(v)}
+                description={`Implied gross yield: ${computeGrossYieldPct(inputs.monthlyRent * 12, inputs.propertyPrice).toFixed(2)}% — compare against the Rental Yield assumption below.`}
               />
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-300">Asset Class</label>
@@ -420,15 +478,31 @@ export default function App() {
             )}
 
             <SectionCard title="Homeownership Costs">
+              <Dropdown
+                label="Community"
+                value={inputs.community}
+                onChange={handleCommunityChange}
+                options={COMMUNITIES.map((c) => ({ value: c.key, label: c.label }))}
+                description="Sets a realistic AED/sq ft/yr service charge rate below, sourced from a Dubai service-charges guide. Still freely adjustable."
+              />
               <Slider
-                label="Monthly Service Charges"
-                value={inputs.monthlyServiceCharges}
-                onChange={setField('monthlyServiceCharges')}
-                min={0}
-                max={5000}
+                label="Property Size"
+                value={inputs.propertySizeSqft}
+                onChange={setField('propertySizeSqft')}
+                min={300}
+                max={15000}
                 step={50}
-                format={(v) => fmt(v)}
-                description="Building/community fees — paid by the owner, not the tenant."
+                format={(v) => `${v.toLocaleString()} sq ft`}
+              />
+              <Slider
+                label="Service Charge Rate"
+                value={inputs.serviceChargeRate}
+                onChange={setField('serviceChargeRate')}
+                min={1}
+                max={70}
+                step={0.5}
+                format={(v) => `${v.toFixed(1)} AED/sq ft/yr`}
+                description={`= ${fmt(computeAnnualServiceCharges(inputs.propertySizeSqft, inputs.serviceChargeRate), false)}/year, paid by the owner, not the tenant.`}
               />
               <Slider
                 label="Annual Home Insurance"
@@ -467,6 +541,33 @@ export default function App() {
                 step={0.1}
                 format={(v) => `${v.toFixed(1)}%`}
               />
+              <Slider
+                label="DLD Transfer Fee"
+                value={inputs.dldFeePct}
+                onChange={setField('dldFeePct')}
+                min={0}
+                max={8}
+                step={0.1}
+                format={(v) => `${v.toFixed(1)}%`}
+                description="Dubai Land Department fee, paid at booking (month 0) — Off-Plan registers it upfront via Oqood, same timing as Ready's purchase."
+              />
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-300">DLD Fee Waiver</label>
+                <PillToggle
+                  value={inputs.dldWaiverPct}
+                  onChange={setField('dldWaiverPct')}
+                  options={[
+                    { value: 0, label: 'No Waiver' },
+                    { value: 50, label: '50% Waiver' },
+                    { value: 100, label: '100% Waiver' },
+                  ]}
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  A developer promotion covering part or all of the DLD fee above.
+                  {inputs.dldWaiverPct > 0 &&
+                    ` Effective fee: ${(inputs.dldFeePct * (1 - inputs.dldWaiverPct / 100)).toFixed(2)}%.`}
+                </p>
+              </div>
             </SectionCard>
 
             <SectionCard title="Market Assumptions">
@@ -492,7 +593,11 @@ export default function App() {
                 max={15}
                 step={0.1}
                 format={(v) => `${v.toFixed(1)}%`}
-                description="Dubai's typical range is 6-10%. Used to offset Danube-style post-handover installments."
+                description={
+                  getRentalYield(inputs.community, inputs.assetClass) != null
+                    ? `Set from Community + Asset Class above. Dubai average is ${DUBAI_AVERAGE_YIELD_PCT}%. Used to offset Danube-style post-handover installments.`
+                    : `Dubai average is ${DUBAI_AVERAGE_YIELD_PCT}% — no yield data for this Community + Asset Class combination, so this stays freely set. Used to offset Danube-style post-handover installments.`
+                }
               />
               <Slider
                 label="Rent Inflation"
@@ -537,40 +642,65 @@ export default function App() {
             <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-900/40 p-6 shadow-lg shadow-black/20">
               <p className="text-xs uppercase tracking-wider text-slate-400">Break-Even Point</p>
               <p className="text-2xl font-bold text-white">
-                {breakEvenYear ? `Year ${breakEvenYear}` : 'Renting Wins'}
+                {displayBreakEvenYear ? `Year ${displayBreakEvenYear}` : 'Renting Wins'}
               </p>
               <p className="mt-1 max-w-xl text-sm text-slate-400">
-                {breakEvenYear
-                  ? `Buying overtakes investing the same capital in year ${breakEvenYear}.`
-                  : 'Over 30 years, investing the same capital beats buying in this scenario.'}
+                {isFlip
+                  ? displayBreakEvenYear
+                    ? `Buying overtakes investing the same capital by the flip, in year ${displayBreakEvenYear}.`
+                    : `Investing the same capital still beats buying at the flip (year ${flipYear}).`
+                  : displayBreakEvenYear
+                    ? `Buying overtakes investing the same capital in year ${displayBreakEvenYear}.`
+                    : 'Over 30 years, investing the same capital beats buying in this scenario.'}
               </p>
 
-              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <StatCard
-                  label="Mortgage (P&I) / mo"
-                  value={mortgagePayment > 0 ? fmt(mortgagePayment, false) : 'N/A (Off-Plan)'}
+                  label={isOffPlan ? 'Installment / mo (Construction)' : 'Mortgage (P&I) / mo'}
+                  value={
+                    isOffPlan
+                      ? fmt(offPlanMonthlyInstallment, false)
+                      : mortgagePayment > 0
+                        ? fmt(mortgagePayment, false)
+                        : 'N/A'
+                  }
                   accentClass="text-white"
+                  tooltip={
+                    isOffPlan
+                      ? `Regular monthly developer milestone payment (excludes the 20% booking fee and any handover-time lump sum). ${PAYMENT_PLANS[inputs.developerPlan]?.label ?? ''} — Danube's continues through month 80, offset by rental income after handover.`
+                      : undefined
+                  }
                 />
                 <StatCard
-                  label="Buyer Net Worth (Yr 30)"
+                  label={isFlip ? `Buyer Net Worth (at Flip, Yr ${flipYear})` : 'Buyer Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
                   accentClass={buyerWinsAt30 ? 'text-amber-400' : 'text-slate-300'}
-                  tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax. Off-Plan-Flip: the reinvested flip proceeds, compounding alone from month 37."
+                  tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax. Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
                 />
                 <StatCard
-                  label="Renter Net Worth (Yr 30)"
+                  label={isFlip ? `Renter Net Worth (at Flip, Yr ${flipYear})` : 'Renter Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
                   accentClass={!buyerWinsAt30 ? 'text-rose-400' : 'text-slate-300'}
                   tooltip="Starting capital equal to the Buyer's own month-0 cash outlay, plus every month's difference between what the Buyer actually spends on the property and rent — compounding at your Global Tax Profile's net stock return."
                 />
+                {isFlip && (
+                  <StatCard
+                    label={`Flip CAGR (${flipYear}-yr)`}
+                    value={flipCAGR != null ? `${(flipCAGR * 100).toFixed(1)}%` : '-'}
+                    accentClass="text-emerald-400"
+                    tooltip="Annualized return on only the capital actually paid to the developer by the flip date (not the full price) — a leveraged figure, since the staged payment schedule means part of the price was never at risk."
+                  />
+                )}
               </div>
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
-              <h3 className="mb-4 text-sm font-semibold text-slate-300">30-Year Net Worth Projection</h3>
+              <h3 className="mb-4 text-sm font-semibold text-slate-300">
+                {isFlip ? `Net Worth Projection Through the Flip (Year ${flipYear})` : '30-Year Net Worth Projection'}
+              </h3>
               <div className="h-[420px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                  <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis
                       dataKey="year"
@@ -595,9 +725,9 @@ export default function App() {
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10 }} />
-                    {breakEvenYear && (
+                    {displayBreakEvenYear && (
                       <ReferenceLine
-                        x={breakEvenYear}
+                        x={displayBreakEvenYear}
                         stroke="#f59e0b"
                         strokeDasharray="4 4"
                         label={{ value: 'Break-even', fill: '#f59e0b', fontSize: 11, position: 'top' }}
@@ -625,6 +755,8 @@ export default function App() {
                 </ResponsiveContainer>
               </div>
               <p className="mt-4 text-xs text-slate-500">
+                {isFlip &&
+                  `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Buyer path is just a generic reinvested portfolio, not a real estate projection. `}
                 Tax calculations are simplified estimates based on standard 2026 primary residence
                 and capital gains laws. Off-plan milestones are estimates.
               </p>
@@ -635,13 +767,17 @@ export default function App() {
 
       <PrintReport
         inputs={inputs}
-        data={data}
+        data={chartData}
         mortgagePayment={mortgagePayment}
         downPayment={downPayment}
-        breakEvenYear={breakEvenYear}
+        breakEvenYear={displayBreakEvenYear}
         finalYear={finalYear}
         displayCurrency={displayCurrency}
         effectiveAppreciation={effectiveAppreciation}
+        flipCAGR={flipCAGR}
+        isFlip={isFlip}
+        flipYear={flipYear}
+        offPlanMonthlyInstallment={offPlanMonthlyInstallment}
       />
     </div>
   )
