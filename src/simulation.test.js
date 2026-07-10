@@ -96,17 +96,19 @@ describe('runSimulation — Off-plan, Hold', () => {
     expect(data[2].buyerNetWorth).toBe(1000000)
   })
 
-  it('Danube: still owes 44% at handover, but net worth is still the property price at 0% rates', () => {
+  it('Danube: still owes 44% at handover, so net worth is only the 56% actually paid in (cash/uncommitted excluded)', () => {
     const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
-    expect(data[2].buyerNetWorth).toBe(1000000)
+    expect(data[2].buyerNetWorth).toBe(560000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(440000, 0) // still tracked, just not counted
   })
 
-  it('Danube: rental yield income during the post-handover installment period is real, additional value', () => {
+  it('Danube: rental yield income offsets the residual float, but that float stays outside Buyer Net Worth', () => {
     const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE', rentalYield: 6 })
-    // Months 37-80: 44 months of (1% price installment) net of (6%/12 * price rental credit) = 5,000 net draw/month
-    // against the 440,000 float remaining at handover -> 440,000 - 44*5,000 = 220,000 left over on top of the
-    // now fully-paid, un-appreciated 1,000,000 property.
-    expect(data[6].buyerNetWorth).toBe(1220000) // year 7 = month 84, 4 months after month 80 payoff
+    // Fully paid off by month 80 (56% by handover + 44% over the next 44 months) -> cost-basis equity
+    // reaches the full 1,000,000 with 0% appreciation; the 220,000 rental-income-offset leftover (see the
+    // prior version of this test) is real money, tracked in buyerCashPortion, but no longer part of net worth.
+    expect(data[6].buyerNetWorth).toBe(1000000) // year 7 = month 84, 4 months after month 80 payoff
+    expect(data[6].buyerCashPortion).toBeCloseTo(220000, 0)
   })
 })
 
@@ -119,12 +121,14 @@ describe('runSimulation — DLD transfer fee', () => {
     expect(data[0].renterNetWorth).toBe(1040000)
   })
 
-  it('Off-Plan Hold: also charged at booking (month 0) — even year 1, before handover, differs', () => {
+  it('Off-Plan Hold: paid from the float at booking, but that float is excluded from Buyer Net Worth', () => {
     const withFee = runSimulation({ ...base, propertyStatus: 'OFFPLAN', dldFeePct: 4 })
     const noFee = runSimulation({ ...base, propertyStatus: 'OFFPLAN', dldFeePct: 0 })
-    // Buyer's float is drawn down by the fee immediately, so year 1 already reflects it;
-    // the Renter's matching contribution also lands at month 0, same parity as Ready.
-    expect(noFee.data[0].buyerNetWorth - withFee.data[0].buyerNetWorth).toBeCloseTo(40000, 0)
+    // Cost-basis equity/appreciation (what Buyer Net Worth is now strictly defined as) don't
+    // touch the DLD fee at all off-plan — it only ever reduces the excluded cash/uncommitted
+    // bucket. The Renter's matching contribution still lands at month 0, same parity as Ready.
+    expect(withFee.data[0].buyerNetWorth).toBe(noFee.data[0].buyerNetWorth)
+    expect(noFee.data[0].buyerCashPortion - withFee.data[0].buyerCashPortion).toBeCloseTo(40000, 0)
     expect(withFee.data[0].renterNetWorth - noFee.data[0].renterNetWorth).toBeCloseTo(40000, 0)
   })
 
@@ -266,6 +270,79 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
       stockReturn: 8,
     })
     expect(data[29].buyerNetWorth).toBeGreaterThan(data[2].buyerNetWorth)
+  })
+})
+
+describe('runSimulation — equity vs appreciation breakdown', () => {
+  // Buyer Net Worth is strictly Cost-Basis Equity + Appreciation Gain —
+  // Cash/Uncommitted is tracked (for the breakdown chart) but deliberately
+  // excluded, since it's idle capital, not realized property value. Not
+  // true for a flip, where the cash IS the realized, cashed-out value —
+  // see the dedicated Flip test below instead.
+  // Precision -1 (tolerance < 5) absorbs the +/-1-2 AED drift from rounding
+  // each component independently, vs. rounding the total once.
+  const equityPlusAppreciationEqualsNetWorth = (row) =>
+    expect(row.buyerCostBasisEquity + row.buyerAppreciationGain).toBeCloseTo(row.buyerNetWorth, -1)
+
+  it('Ready, mortgaged, with appreciation and a US exit tax: equity + appreciation always equal net worth', () => {
+    const { data } = runSimulation({
+      ...base,
+      downPaymentPct: 20,
+      homeAppreciation: 8,
+      citizenship: 'USA',
+      taxResidence: 'UAE',
+    })
+    data.forEach(equityPlusAppreciationEqualsNetWorth)
+  })
+
+  it('Ready: cost-basis equity grows via mortgage paydown even with zero appreciation', () => {
+    const { data } = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5 })
+    expect(data[0].buyerCostBasisEquity).toBeGreaterThan(200000) // more than the 20% down payment alone
+    expect(data[0].buyerAppreciationGain).toBe(0) // 0% appreciation in `base`
+    expect(data[0].buyerCashPortion).toBe(0) // Ready never has an off-plan float
+    data.forEach(equityPlusAppreciationEqualsNetWorth)
+  })
+
+  it('Ready: appreciation gain is the full price growth when paid in cash (no loan to net against)', () => {
+    const { data } = runSimulation({ ...base, homeAppreciation: 10 })
+    expect(data[2].buyerCostBasisEquity).toBe(1000000) // fully paid, no mortgage
+    // Year 3 (month 36) has only had 2 annual step-ups so far (at months 13
+    // and 25 — the next is month 37), same convention as `data[2].homeValue`
+    // elsewhere in this file.
+    expect(data[2].buyerAppreciationGain).toBeCloseTo(1000000 * 1.1 ** 2 - 1000000, 0)
+    data.forEach(equityPlusAppreciationEqualsNetWorth)
+  })
+
+  it('Off-Plan construction: cost-basis equity is what has actually been paid to the developer', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'EMAAR', homeAppreciation: 10 })
+    // Year 1 (month 12): booking (20%) + 12 monthly installments already paid.
+    const paidByMonth12 = 200000 + 12 * ((600000 / 36))
+    expect(data[0].buyerCostBasisEquity).toBeCloseTo(paidByMonth12, 0)
+    expect(data[0].buyerCashPortion).toBeGreaterThan(0) // unspent float, tracked but excluded from net worth
+    data.forEach(equityPlusAppreciationEqualsNetWorth)
+  })
+
+  it('Off-Plan Hold, post-handover: equity + appreciation still equal net worth through the Danube phase', () => {
+    const { data } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'DANUBE',
+      homeAppreciation: 6,
+      rentalYield: 6,
+    })
+    data.forEach(equityPlusAppreciationEqualsNetWorth)
+  })
+
+  it('Flip: the entire net worth is cash (the realized, cashed-out value), not equity or appreciation', () => {
+    const { data } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      exitStrategy: 'FLIP',
+      homeAppreciation: 10,
+    })
+    expect(data[2].buyerCostBasisEquity).toBe(0)
+    expect(data[2].buyerAppreciationGain).toBe(0)
+    expect(data[2].buyerCashPortion).toBe(data[2].buyerNetWorth)
   })
 })
 

@@ -222,21 +222,50 @@ export function runSimulation(inputs) {
     if (month % 12 === 0) {
       const year = month / 12
       let buyerNetWorth
+      // - costBasisEquity: principal actually paid in so far (mortgage
+      //   paydown, or developer milestones), at the ORIGINAL price — not
+      //   touched by price growth, selling costs, or exit tax.
+      // - appreciationGainNet: the price-growth portion, net of exit tax and
+      //   selling costs (those are charged against the gain, not the
+      //   principal — matches how the exit tax itself is already computed,
+      //   on profit alone). Proportional to costBasisEquity while off-plan
+      //   construction is still in progress (you only own a fraction of the
+      //   gain until you've paid that same fraction of the price).
+      // - cashPortion: capital not tied up in the property — the off-plan
+      //   float (pre-handover, or Danube's post-handover residual). Tracked
+      //   for the breakdown chart but deliberately excluded from
+      //   buyerNetWorth below — it's idle capital, not realized property
+      //   value, until either the property is fully owned (folds into
+      //   appreciation/equity naturally) or the deal is flipped (see below).
+      let costBasisEquity
+      let appreciationGainNet
+      let cashPortion
 
       if (flipExecuted) {
+        // Unlike the pre-handover float, this cash IS the realized,
+        // cashed-out value of the investment — a flip's whole point is
+        // converting property equity into cash, so it counts in full.
         buyerNetWorth = flipPortfolio
+        costBasisEquity = 0
+        appreciationGainNet = 0
+        cashPortion = flipPortfolio
       } else if (isOffPlan && !handoverDone) {
-        const proportionalEquityValue = (paidToDeveloper / propertyPrice) * homeValue
-        buyerNetWorth = buyerPool + proportionalEquityValue
+        const appreciationGain = homeValue - propertyPrice
+        costBasisEquity = paidToDeveloper
+        appreciationGainNet = paidToDeveloper * (appreciationGain / propertyPrice)
+        cashPortion = buyerPool
+        buyerNetWorth = costBasisEquity + appreciationGainNet
       } else {
         // Ready, or off-plan post-handover — both are now a straightforward
         // owned home: value if sold this year, net of selling costs, any
         // remaining developer/mortgage balance, and the exit tax.
         const remainingBalance = isOffPlan ? Math.max(0, propertyPrice - paidToDeveloper) : loanBalance
-        const profitIfSoldNow = homeValue - propertyPrice
-        const exitTax = computeHoldExitTax(profitIfSoldNow, taxProfile)
-        const leftoverPool = isOffPlan ? buyerPool : 0
-        buyerNetWorth = homeValue * (1 - sellingCostPct / 100) - remainingBalance - exitTax + leftoverPool
+        const appreciationGain = homeValue - propertyPrice
+        const exitTax = computeHoldExitTax(appreciationGain, taxProfile)
+        costBasisEquity = propertyPrice - remainingBalance
+        appreciationGainNet = appreciationGain - exitTax - homeValue * (sellingCostPct / 100)
+        cashPortion = isOffPlan ? buyerPool : 0
+        buyerNetWorth = costBasisEquity + appreciationGainNet
       }
 
       data.push({
@@ -244,6 +273,9 @@ export function runSimulation(inputs) {
         buyerNetWorth: Math.round(buyerNetWorth),
         renterNetWorth: Math.round(renterPortfolio),
         homeValue: Math.round(homeValue),
+        buyerCostBasisEquity: Math.round(costBasisEquity),
+        buyerAppreciationGain: Math.round(appreciationGainNet),
+        buyerCashPortion: Math.round(cashPortion),
       })
     }
   }

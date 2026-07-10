@@ -1,4 +1,6 @@
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -140,6 +142,59 @@ export default function PrintReport({
                 isAnimationActive={false}
               />
             </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section className="mb-6" style={{ breakInside: 'avoid' }}>
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+          Buyer Net Worth: Equity vs Appreciation
+        </h2>
+        <p className="mb-3 text-sm">
+          Cost-Basis Equity is what you've actually paid in (mortgage paydown or developer
+          milestones), at the original price. Appreciation Gain is the price-growth portion, net
+          of exit tax and selling costs. Together, these two are Buyer Net Worth — the Buying line
+          above.
+          {isOffPlan &&
+            " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value. A flip is the exception: its reinvested proceeds ARE the realized value, so they count in full."}
+        </p>
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="year" stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
+              <YAxis
+                stroke="#475569"
+                tick={{ fill: '#475569', fontSize: 11 }}
+                tickFormatter={(v) => fmt(v)}
+                width={65}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine y={0} stroke="#94a3b8" />
+              <Bar
+                dataKey="buyerCostBasisEquity"
+                name="Cost-Basis Equity"
+                stackId="buyer"
+                fill="#f59e0b"
+                isAnimationActive={false}
+              />
+              <Bar
+                dataKey="buyerAppreciationGain"
+                name="Appreciation Gain"
+                stackId="buyer"
+                fill="#22c55e"
+                isAnimationActive={false}
+              />
+              {isOffPlan && (
+                <Bar
+                  dataKey="buyerCashPortion"
+                  name="Cash / Uncommitted"
+                  stackId="buyer"
+                  fill="#94a3b8"
+                  isAnimationActive={false}
+                />
+              )}
+            </BarChart>
           </ResponsiveContainer>
         </div>
       </section>

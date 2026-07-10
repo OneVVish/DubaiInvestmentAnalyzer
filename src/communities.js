@@ -27,5 +27,7 @@ export const COMMUNITIES = [
   { key: 'VILLANOVA', label: 'Villanova' },
   { key: 'TOWN_SQUARE', label: 'Town Square' },
   { key: 'AL_FURJAN', label: 'Al Furjan' },
+  { key: 'ARJAN', label: 'Arjan' },
+  { key: 'THE_SPRINGS', label: 'The Springs' },
   { key: 'OTHER', label: 'Other / Custom' },
 ]

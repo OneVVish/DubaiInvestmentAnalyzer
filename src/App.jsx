@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -24,6 +26,7 @@ import { HANDOVER_MONTH, PAYMENT_PLANS, amountDueInMonth, buildMilestoneSchedule
 import { COMMUNITIES } from './communities.js'
 import { computeAnnualServiceCharges, getServiceChargeRate } from './serviceCharges.js'
 import { DUBAI_AVERAGE_YIELD_PCT, computeGrossYieldPct, getRentalYield } from './rentalYield.js'
+import { getPricePerSqft } from './pricePerSqft.js'
 import { CURRENCIES } from './currency.js'
 import { formatCurrency } from './format.js'
 import { buildShareUrl, getStateFromUrl } from './shareState.js'
@@ -152,24 +155,31 @@ function Dropdown({ label, value, onChange, options, description }) {
 
 const tooltipFormatter = (fmt) => (value, name) => [fmt(value, false), name]
 
+const DEFAULT_COMMUNITY = 'MARINA'
+const DEFAULT_ASSET_CLASS = 'CONDO'
+const DEFAULT_SIZE_SQFT = ASSET_CLASS_SIZE_DEFAULTS[DEFAULT_ASSET_CLASS]
+const DEFAULT_RENTAL_YIELD = getRentalYield(DEFAULT_COMMUNITY, DEFAULT_ASSET_CLASS) ?? DUBAI_AVERAGE_YIELD_PCT
+const DEFAULT_PRICE_PER_SQFT = getPricePerSqft(DEFAULT_COMMUNITY, DEFAULT_ASSET_CLASS)
+const DEFAULT_PROPERTY_PRICE = DEFAULT_PRICE_PER_SQFT ? DEFAULT_SIZE_SQFT * DEFAULT_PRICE_PER_SQFT : 1500000
+
 const DEFAULT_INPUTS = {
-  propertyPrice: 1500000,
-  monthlyRent: 8750,
+  propertyPrice: DEFAULT_PROPERTY_PRICE,
+  monthlyRent: Math.round((DEFAULT_PROPERTY_PRICE * (DEFAULT_RENTAL_YIELD / 100)) / 12),
   rentInflation: 5,
-  rentalYield: getRentalYield('MARINA', 'CONDO') ?? DUBAI_AVERAGE_YIELD_PCT,
-  assetClass: 'CONDO',
+  rentalYield: DEFAULT_RENTAL_YIELD,
+  assetClass: DEFAULT_ASSET_CLASS,
   nearMetro: false,
   nearAirport: false,
-  homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS.CONDO,
+  homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[DEFAULT_ASSET_CLASS],
   propertyStatus: 'READY',
   developerPlan: 'EMAAR',
   exitStrategy: 'HOLD',
   downPaymentPct: 25,
   mortgageRate: 4.5,
   mortgageTermYears: 25,
-  community: 'MARINA',
-  propertySizeSqft: ASSET_CLASS_SIZE_DEFAULTS.CONDO,
-  serviceChargeRate: getServiceChargeRate('MARINA'),
+  community: DEFAULT_COMMUNITY,
+  propertySizeSqft: DEFAULT_SIZE_SQFT,
+  serviceChargeRate: getServiceChargeRate(DEFAULT_COMMUNITY),
   homeInsuranceAnnual: 1500,
   yearlyMaintenance: 5000,
   costInflation: 3,
@@ -197,13 +207,16 @@ export default function App() {
 
   const handleAssetClassChange = (assetClass) =>
     setInputs((prev) => {
+      const newSize = ASSET_CLASS_SIZE_DEFAULTS[assetClass]
       const yieldPct = getRentalYield(prev.community, assetClass)
+      const pricePerSqft = getPricePerSqft(prev.community, assetClass)
       return {
         ...prev,
         assetClass,
         homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[assetClass],
-        propertySizeSqft: ASSET_CLASS_SIZE_DEFAULTS[assetClass],
+        propertySizeSqft: newSize,
         ...(yieldPct != null ? { rentalYield: yieldPct } : {}),
+        ...(pricePerSqft != null ? { propertyPrice: newSize * pricePerSqft } : {}),
       }
     })
 
@@ -211,11 +224,13 @@ export default function App() {
     setInputs((prev) => {
       const rate = getServiceChargeRate(community)
       const yieldPct = getRentalYield(community, prev.assetClass)
+      const pricePerSqft = getPricePerSqft(community, prev.assetClass)
       return {
         ...prev,
         community,
         ...(rate != null ? { serviceChargeRate: rate } : {}),
         ...(yieldPct != null ? { rentalYield: yieldPct } : {}),
+        ...(pricePerSqft != null ? { propertyPrice: prev.propertySizeSqft * pricePerSqft } : {}),
       }
     })
 
@@ -369,6 +384,22 @@ export default function App() {
           {/* Inputs */}
           <div className="space-y-5">
             <SectionCard title="The Property">
+              <Dropdown
+                label="Community"
+                value={inputs.community}
+                onChange={handleCommunityChange}
+                options={COMMUNITIES.map((c) => ({ value: c.key, label: c.label }))}
+                description="Sets realistic defaults below (Property Price, Service Charge Rate, Rental Yield) from Dubai market guides. Still freely adjustable."
+              />
+              <Slider
+                label="Property Size"
+                value={inputs.propertySizeSqft}
+                onChange={setField('propertySizeSqft')}
+                min={300}
+                max={15000}
+                step={50}
+                format={(v) => `${v.toLocaleString()} sq ft`}
+              />
               <Slider
                 label="Property Price"
                 value={inputs.propertyPrice}
@@ -377,6 +408,11 @@ export default function App() {
                 max={20000000}
                 step={10000}
                 format={(v) => fmt(v)}
+                description={(() => {
+                  const communityRate = getPricePerSqft(inputs.community, inputs.assetClass)
+                  const implied = Math.round(inputs.propertyPrice / inputs.propertySizeSqft)
+                  return `Implied price: ${implied.toLocaleString()} AED/sq ft${communityRate != null ? ` — community typical: ${communityRate.toLocaleString()} AED/sq ft` : ''}`
+                })()}
               />
               <Slider
                 label="Monthly Rent (comparable)"
@@ -478,22 +514,6 @@ export default function App() {
             )}
 
             <SectionCard title="Homeownership Costs">
-              <Dropdown
-                label="Community"
-                value={inputs.community}
-                onChange={handleCommunityChange}
-                options={COMMUNITIES.map((c) => ({ value: c.key, label: c.label }))}
-                description="Sets a realistic AED/sq ft/yr service charge rate below, sourced from a Dubai service-charges guide. Still freely adjustable."
-              />
-              <Slider
-                label="Property Size"
-                value={inputs.propertySizeSqft}
-                onChange={setField('propertySizeSqft')}
-                min={300}
-                max={15000}
-                step={50}
-                format={(v) => `${v.toLocaleString()} sq ft`}
-              />
               <Slider
                 label="Service Charge Rate"
                 value={inputs.serviceChargeRate}
@@ -760,6 +780,54 @@ export default function App() {
                 Tax calculations are simplified estimates based on standard 2026 primary residence
                 and capital gains laws. Off-plan milestones are estimates.
               </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
+              <h3 className="mb-1 text-sm font-semibold text-slate-300">Buyer Net Worth: Equity vs Appreciation</h3>
+              <p className="mb-4 text-xs text-slate-500">
+                Cost-Basis Equity is what you've actually paid in (mortgage paydown or developer
+                milestones), at the original price. Appreciation Gain is the price-growth portion,
+                net of exit tax and selling costs. Together, these two are Buyer Net Worth — the
+                Buying line above.
+                {isOffPlan &&
+                  ' Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it\'s idle capital, not realized property value. A flip is the exception: its reinvested proceeds ARE the realized value, so they count in full.'}
+              </p>
+              <div className="h-[360px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis
+                      dataKey="year"
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      label={{ value: 'Years', position: 'insideBottom', offset: -3, fill: '#64748b' }}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tickFormatter={(v) => fmt(v)}
+                      width={70}
+                    />
+                    <Tooltip
+                      formatter={tooltipFormatter(fmt)}
+                      labelFormatter={(year) => `Year ${year}`}
+                      contentStyle={{
+                        backgroundColor: '#0f172a',
+                        border: '1px solid #334155',
+                        borderRadius: '0.75rem',
+                        color: '#e2e8f0',
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10 }} />
+                    <ReferenceLine y={0} stroke="#475569" />
+                    <Bar dataKey="buyerCostBasisEquity" name="Cost-Basis Equity" stackId="buyer" fill="#f59e0b" />
+                    <Bar dataKey="buyerAppreciationGain" name="Appreciation Gain" stackId="buyer" fill="#22c55e" />
+                    {isOffPlan && (
+                      <Bar dataKey="buyerCashPortion" name="Cash / Uncommitted" stackId="buyer" fill="#94a3b8" />
+                    )}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
         </div>
