@@ -54,33 +54,37 @@ describe('runSimulation — Ready property', () => {
     expect(withCharges.data[0].renterNetWorth - noCharges.data[0].renterNetWorth).toBeCloseTo(annualCharge, 0)
   })
 
+  // Appreciation now steps at months 1, 13, and 25 (starts immediately,
+  // not after a full year) — so by year 3 (month 36), 3 steps have fired.
+  const YEAR3_HOME_VALUE_AT_50PCT = 1000000 * 1.5 ** 3
+
   it('a UAE tax-free profile owes no exit tax on a large gain', () => {
     const { data } = runSimulation({ ...base, homeAppreciation: 50 })
-    expect(data[2].homeValue).toBe(2250000)
-    expect(data[2].buyerNetWorth).toBe(2250000) // full gain, no tax
+    expect(data[2].homeValue).toBe(YEAR3_HOME_VALUE_AT_50PCT)
+    expect(data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT) // full gain, no tax
   })
 
   it('a US citizen owes exit tax only on profit beyond the $250K USD exemption', () => {
     const { data } = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'USA', taxResidence: 'UAE' })
-    const profitAED = 2250000 - 1000000
+    const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const taxableUSD = Math.max(0, profitAED / AED_PER_USD - 250000)
     const expectedTax = taxableUSD * AED_PER_USD * 0.15
-    expect(data[2].buyerNetWorth).toBeCloseTo(2250000 - expectedTax, 0)
+    expect(data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - expectedTax, 0)
     expect(expectedTax).toBeGreaterThan(0) // sanity: this scenario actually exceeds the exemption
   })
 
   it('UK and Canada residents owe zero exit tax even on a large gain (primary-residence relief)', () => {
     const uk = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'UK', taxResidence: 'UK' })
     const canada = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'UAE/Other', taxResidence: 'Canada' })
-    expect(uk.data[2].buyerNetWorth).toBe(2250000)
-    expect(canada.data[2].buyerNetWorth).toBe(2250000)
+    expect(uk.data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT)
+    expect(canada.data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT)
   })
 
   it('India owes exit tax on the full profit, with no exemption', () => {
     const { data } = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'India', taxResidence: 'India' })
-    const profitAED = 2250000 - 1000000
+    const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const expectedTax = profitAED * 0.125
-    expect(data[2].buyerNetWorth).toBeCloseTo(2250000 - expectedTax, 0)
+    expect(data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - expectedTax, 0)
   })
 })
 
@@ -306,10 +310,9 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
   it('Ready: appreciation gain is the full price growth when paid in cash (no loan to net against)', () => {
     const { data } = runSimulation({ ...base, homeAppreciation: 10 })
     expect(data[2].buyerCostBasisEquity).toBe(1000000) // fully paid, no mortgage
-    // Year 3 (month 36) has only had 2 annual step-ups so far (at months 13
-    // and 25 — the next is month 37), same convention as `data[2].homeValue`
-    // elsewhere in this file.
-    expect(data[2].buyerAppreciationGain).toBeCloseTo(1000000 * 1.1 ** 2 - 1000000, 0)
+    // Year 3 (month 36) has had 3 annual step-ups (months 1, 13, 25 —
+    // appreciation starts immediately, unlike rent/cost inflation).
+    expect(data[2].buyerAppreciationGain).toBeCloseTo(1000000 * 1.1 ** 3 - 1000000, 0)
     data.forEach(equityPlusAppreciationEqualsNetWorth)
   })
 
@@ -333,16 +336,33 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
     data.forEach(equityPlusAppreciationEqualsNetWorth)
   })
 
-  it('Flip: the entire net worth is cash (the realized, cashed-out value), not equity or appreciation', () => {
+  it('Flip year: the payout is attributed back to equity paid in vs. appreciation gain, not dumped into cash', () => {
     const { data } = runSimulation({
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       homeAppreciation: 10,
     })
-    expect(data[2].buyerCostBasisEquity).toBe(0)
-    expect(data[2].buyerAppreciationGain).toBe(0)
-    expect(data[2].buyerCashPortion).toBe(data[2].buyerNetWorth)
+    const paidByMonth35 = 1000000 - 216666.6666667 // same Emaar figure used elsewhere in this file
+    const v36 = 1000000 * 1.1 ** 3
+    const profit = v36 - 1000000
+    expect(data[2].buyerCostBasisEquity).toBeCloseTo(paidByMonth35, 0) // base has 0% dld fee, 0% flip tax
+    expect(data[2].buyerAppreciationGain).toBeCloseTo(profit, 0)
+    expect(data[2].buyerCashPortion).toBe(0)
+    equityPlusAppreciationEqualsNetWorth(data[2])
+  })
+
+  it('Post-flip years (if ever shown) revert to pure cash, since the payout is now just a stock portfolio', () => {
+    const { data } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      exitStrategy: 'FLIP',
+      homeAppreciation: 10,
+      stockReturn: 8,
+    })
+    expect(data[3].buyerCostBasisEquity).toBe(0)
+    expect(data[3].buyerAppreciationGain).toBe(0)
+    expect(data[3].buyerCashPortion).toBe(data[3].buyerNetWorth)
   })
 })
 

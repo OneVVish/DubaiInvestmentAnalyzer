@@ -156,7 +156,9 @@ export default function PrintReport({
           of exit tax and selling costs. Together, these two are Buyer Net Worth — the Buying line
           above.
           {isOffPlan &&
-            " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value. A flip is the exception: its reinvested proceeds ARE the realized value, so they count in full."}
+            " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value."}
+          {isFlip &&
+            ' In the flip year itself, the payout is attributed back to Cost-Basis Equity and Appreciation Gain (where it actually came from) rather than shown as cash — only in years after the flip does it become an undifferentiated reinvested portfolio.'}
         </p>
         <div className="h-[280px] w-full">
           <ResponsiveContainer width="100%" height="100%">

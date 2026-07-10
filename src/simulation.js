@@ -126,12 +126,24 @@ export function runSimulation(inputs) {
   let flipExecuted = false
   let flipPortfolio = 0
   let flipCAGR = null
+  // The flip year's own equity/appreciation lineage, captured once at the
+  // moment of the flip (see below) — used only for that one year's
+  // breakdown row. Every year after, the proceeds are just cash (see the
+  // snapshot logic further down).
+  let flipEquityAtFlip = 0
+  let flipAppreciationAtFlip = 0
 
   const data = []
 
   for (let month = 1; month <= MONTHS; month++) {
-    if (month > 1 && (month - 1) % 12 === 0) {
+    // Home appreciation starts compounding from month 1 (year 1 already
+    // reflects a year of growth) — deliberately on a different schedule
+    // than rent/cost inflation below, which still wait a full year before
+    // their first step.
+    if ((month - 1) % 12 === 0) {
       homeValue *= 1 + effectiveAppreciation / 100
+    }
+    if (month > 1 && (month - 1) % 12 === 0) {
       rent *= 1 + rentInflation / 100
       serviceCharges *= 1 + costInflation / 100
       insurance *= 1 + costInflation / 100
@@ -153,9 +165,10 @@ export function runSimulation(inputs) {
       const isFlipMonth = isFlip && month === HANDOVER_MONTH
       if (isFlipMonth) {
         // Never pay the handover-triggering milestone — sell the contract
-        // instead. V36 uses the spec's own closed-form formula directly
-        // (not whatever the iterative `homeValue` happens to read at this
-        // exact month) since it's independently specified.
+        // instead. V36 is computed directly from the spec's closed-form
+        // formula (equivalent to the iterative `homeValue` by this point,
+        // since appreciation has stepped 3 times by month 36) rather than
+        // relying on loop state.
         const v36 = propertyPrice * (1 + effectiveAppreciation / 100) ** 3
         const paidToDeveloperSoFar = cumulativePaidByMonth(schedule, HANDOVER_MONTH - 1)
         const remainingObligation = propertyPrice - paidToDeveloperSoFar
@@ -168,6 +181,14 @@ export function runSimulation(inputs) {
         flipPortfolio = cashRealized - flipTax - dldFee
         flipExecuted = true
         buyerCostThisMonth = 0 // no rent/milestone this month — the sale replaces it
+
+        // Where the flip payout actually came from — principal paid in
+        // (net of the DLD fee, also cash sunk into this deal) vs. the
+        // appreciation gain (net of the flip's own tax). These sum exactly
+        // to flipPortfolio: paidToDeveloperSoFar + (v36 - propertyPrice) -
+        // dldFee - flipTax = (v36 - remainingObligation) - flipTax - dldFee.
+        flipEquityAtFlip = paidToDeveloperSoFar - dldFee
+        flipAppreciationAtFlip = profit - flipTax
 
         // Annualized return on total cash actually committed by handover —
         // developer milestones plus the DLD fee — not the full price. A
@@ -241,10 +262,20 @@ export function runSimulation(inputs) {
       let appreciationGainNet
       let cashPortion
 
-      if (flipExecuted) {
-        // Unlike the pre-handover float, this cash IS the realized,
-        // cashed-out value of the investment — a flip's whole point is
-        // converting property equity into cash, so it counts in full.
+      if (flipExecuted && month === HANDOVER_MONTH) {
+        // The flip year itself: show where the payout actually came from
+        // (equity paid in vs. appreciation gain) rather than dumping it
+        // all into an opaque "cash" bucket — the whole point of a flip is
+        // converting property gains into cash, not that those gains never
+        // existed.
+        buyerNetWorth = flipPortfolio
+        costBasisEquity = flipEquityAtFlip
+        appreciationGainNet = flipAppreciationAtFlip
+        cashPortion = 0
+      } else if (flipExecuted) {
+        // Any year after the flip: now it's just a generic reinvested
+        // stock portfolio, fully disconnected from real estate — no equity
+        // or appreciation left to attribute.
         buyerNetWorth = flipPortfolio
         costBasisEquity = 0
         appreciationGainNet = 0
