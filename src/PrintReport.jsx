@@ -35,7 +35,8 @@ export default function PrintReport({
   breakEvenYear,
   finalYear,
   displayCurrency,
-  effectiveAppreciation,
+  effectivePreHandoverAppreciation,
+  effectivePostHandoverAppreciation,
   flipCAGR,
   isFlip,
   flipYear,
@@ -153,8 +154,10 @@ export default function PrintReport({
         <p className="mb-3 text-sm">
           Cost-Basis Equity is what you've actually paid in (mortgage paydown or developer
           milestones), at the original price. Appreciation Gain is the price-growth portion, net
-          of exit tax and selling costs. Together, these two are Buyer Net Worth — the Buying line
-          above.
+          of exit tax and selling costs. Invested Rental Surplus is the landlord's accumulated
+          rental profit — rent collected, net of vacancy, minus the mortgage (or off-plan
+          installment) and carrying costs — reinvested and compounding. Together, these three are
+          Buyer Net Worth — the Buying line above.
           {isOffPlan &&
             " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value."}
           {isFlip &&
@@ -187,6 +190,13 @@ export default function PrintReport({
                 fill="#22c55e"
                 isAnimationActive={false}
               />
+              <Bar
+                dataKey="buyerLandlordSurplus"
+                name="Invested Rental Surplus"
+                stackId="buyer"
+                fill="#14b8a6"
+                isAnimationActive={false}
+              />
               {isOffPlan && (
                 <Bar
                   dataKey="buyerCashPortion"
@@ -205,7 +215,7 @@ export default function PrintReport({
         <div>
           <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">The Property</h2>
           <InputRow label="Property Price" value={fmt(inputs.propertyPrice, false)} />
-          <InputRow label="Monthly Rent (comparable)" value={fmt(inputs.monthlyRent, false)} />
+          <InputRow label="Monthly Rent (Collected)" value={fmt(inputs.monthlyRent, false)} />
           <InputRow label="Asset Class" value={inputs.assetClass === 'CONDO' ? 'Condo' : 'Townhouse / Villa'} />
           <InputRow label="Near Metro Blue Line Expansion" value={inputs.nearMetro ? 'Yes' : 'No'} />
           <InputRow label="Near Al Maktoum Airport Expansion" value={inputs.nearAirport ? 'Yes' : 'No'} />
@@ -256,9 +266,22 @@ export default function PrintReport({
 
         <div>
           <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Market Assumptions</h2>
-          <InputRow label="Base Home Appreciation" value={`${inputs.homeAppreciation.toFixed(1)}%`} />
-          <InputRow label="Effective Appreciation Rate" value={`${effectiveAppreciation.toFixed(1)}%`} />
+          {isOffPlan && (
+            <>
+              <InputRow label="Pre-Handover Appreciation" value={`${inputs.preHandoverAppreciation.toFixed(1)}%`} />
+              <InputRow
+                label="Effective Pre-Handover Rate"
+                value={`${effectivePreHandoverAppreciation.toFixed(1)}%`}
+              />
+            </>
+          )}
+          <InputRow label="Post-Handover Appreciation" value={`${inputs.postHandoverAppreciation.toFixed(1)}%`} />
+          <InputRow
+            label="Effective Post-Handover Rate"
+            value={`${effectivePostHandoverAppreciation.toFixed(1)}%`}
+          />
           <InputRow label="Rental Yield" value={`${inputs.rentalYield.toFixed(1)}%`} />
+          <InputRow label="Vacancy Rate" value={`${inputs.vacancyRatePct.toFixed(1)}%`} />
           <InputRow label="Rent Inflation" value={`${inputs.rentInflation.toFixed(1)}%`} />
           <InputRow label="Expected Stock Market Return (gross)" value={`${inputs.stockReturn.toFixed(1)}%`} />
 

@@ -7,7 +7,13 @@ import { computeAnnualizedIRR } from './irr.js'
 export const YEARS = 30
 export const MONTHS = YEARS * 12
 
+// Pre-handover defaults vary by asset class — off-plan construction-phase
+// appreciation in Dubai is commonly quoted much higher (scarcity/pre-launch
+// pricing). Post-handover is a single flat default: once a property is
+// completed and trading on the secondary market, appreciation normalizes
+// toward general market growth, regardless of asset class.
 export const ASSET_CLASS_APPRECIATION_DEFAULTS = { CONDO: 11, VILLA: 20 }
+export const POST_HANDOVER_APPRECIATION_DEFAULT = 5
 export const ASSET_CLASS_SIZE_DEFAULTS = { CONDO: 1200, VILLA: 3500 }
 export const METRO_BONUS_PCT = 1.5
 export const AIRPORT_BONUS_PCT = 2.5
@@ -23,8 +29,17 @@ export function calculateMortgagePayment(loanAmount, annualRate, termMonths) {
 // Infrastructure bonuses are additive on top of whatever the appreciation
 // slider currently reads, computed here rather than mutating the slider —
 // the UI shows this as a derived "effective rate," not a rewritten input.
-export function getEffectiveAppreciation(inputs) {
-  let rate = inputs.homeAppreciation
+// Applied to both phases: a Metro/Airport expansion affects the location's
+// fundamental value regardless of when you take possession.
+export function getEffectivePreHandoverAppreciation(inputs) {
+  let rate = inputs.preHandoverAppreciation
+  if (inputs.nearMetro) rate += METRO_BONUS_PCT
+  if (inputs.nearAirport) rate += AIRPORT_BONUS_PCT
+  return rate
+}
+
+export function getEffectivePostHandoverAppreciation(inputs) {
+  let rate = inputs.postHandoverAppreciation
   if (inputs.nearMetro) rate += METRO_BONUS_PCT
   if (inputs.nearAirport) rate += AIRPORT_BONUS_PCT
   return rate
@@ -55,7 +70,7 @@ export function runSimulation(inputs) {
     propertyPrice,
     monthlyRent,
     rentInflation,
-    rentalYield,
+    vacancyRatePct,
     propertyStatus, // 'READY' | 'OFFPLAN'
     developerPlan, // 'EMAAR' | 'DAMAC' | 'DANUBE' — off-plan only
     exitStrategy, // 'HOLD' | 'FLIP' — off-plan only
@@ -78,7 +93,8 @@ export function runSimulation(inputs) {
   const taxProfile = resolveTaxProfile(citizenship, taxResidence)
   const netStockReturn = getNetStockReturn(stockReturn, taxProfile)
   const monthlyNetStockReturn = Math.pow(1 + netStockReturn / 100, 1 / 12) - 1
-  const effectiveAppreciation = getEffectiveAppreciation(inputs)
+  const effectivePreHandoverAppreciation = getEffectivePreHandoverAppreciation(inputs)
+  const effectivePostHandoverAppreciation = getEffectivePostHandoverAppreciation(inputs)
   const monthlyMortgageRate = mortgageRate / 100 / 12
 
   const isOffPlan = propertyStatus === 'OFFPLAN'
@@ -134,15 +150,29 @@ export function runSimulation(inputs) {
   let flipEquityAtFlip = 0
   let flipAppreciationAtFlip = 0
 
+  // Rental profit, net of the property's own ownership cost (mortgage P&I,
+  // or the off-plan developer installment) and carrying costs, reinvested
+  // and compounding — a landlord's realized surplus (or deficit). Separate
+  // from buyerPool, which tracks off-plan capital not yet deployed into
+  // the property; this is already-earned rental cash, so it's INCLUDED in
+  // Buyer Net Worth below (buyerPool/cashPortion stays excluded). Stays 0
+  // during off-plan construction (nothing built/rentable yet) and for a
+  // flipped contract (never occupied/rented at all).
+  let landlordSurplus = 0
+
   const data = []
 
   for (let month = 1; month <= MONTHS; month++) {
     // Home appreciation starts compounding from month 1 (year 1 already
     // reflects a year of growth) — deliberately on a different schedule
     // than rent/cost inflation below, which still wait a full year before
-    // their first step.
+    // their first step. Pre-handover rate applies while off-plan
+    // construction is still in progress; Ready properties (never off-plan)
+    // always use the post-handover rate, since they have no construction
+    // phase at all.
     if ((month - 1) % 12 === 0) {
-      homeValue *= 1 + effectiveAppreciation / 100
+      const rate = isOffPlan && !handoverDone ? effectivePreHandoverAppreciation : effectivePostHandoverAppreciation
+      homeValue *= 1 + rate / 100
     }
     if (month > 1 && (month - 1) % 12 === 0) {
       rent *= 1 + rentInflation / 100
@@ -152,13 +182,18 @@ export function runSimulation(inputs) {
     }
 
     const monthlyCarryingCosts = serviceCharges + insurance / 12 + maintenance / 12
+    // Vacancy reduces what the landlord actually collects, not what they
+    // owe — a mortgage payment or service charge doesn't pause just
+    // because the unit sits empty between tenants.
+    const collectedRent = rent * (1 - vacancyRatePct / 100)
 
-    // buyerCostThisMonth feeds the Renter-delta below: whatever the Buyer
-    // actually spends (or nets, after any offsetting income) that month,
-    // compared against the Renter's rent. `null` only once flipped — from
-    // then on the Buyer-path is a standalone portfolio with no further cost
-    // to mirror (they stop paying rent too, per spec).
-    let buyerCostThisMonth = 0
+    // investingContribution feeds the Investing-side portfolio below: the
+    // capital that would otherwise have gone into building home equity
+    // this month (full mortgage P&I, or the off-plan developer
+    // installment due) — a pure "same capital, different destination"
+    // comparison. Rent plays no role on either side of this comparison;
+    // Buying's rental economics are tracked separately, in landlordSurplus.
+    let investingContribution = 0
 
     if (flipExecuted) {
       flipPortfolio *= 1 + monthlyNetStockReturn
@@ -167,10 +202,11 @@ export function runSimulation(inputs) {
       if (isFlipMonth) {
         // Never pay the handover-triggering milestone — sell the contract
         // instead. V36 is computed directly from the spec's closed-form
-        // formula (equivalent to the iterative `homeValue` by this point,
-        // since appreciation has stepped 3 times by month 36) rather than
-        // relying on loop state.
-        const v36 = propertyPrice * (1 + effectiveAppreciation / 100) ** 3
+        // formula, using the pre-handover rate (equivalent to the iterative
+        // `homeValue` by this point, since appreciation has stepped 3 times
+        // by month 36, always at the pre-handover rate — a flip never
+        // reaches handover) rather than relying on loop state.
+        const v36 = propertyPrice * (1 + effectivePreHandoverAppreciation / 100) ** 3
         const paidToDeveloperSoFar = cumulativePaidByMonth(schedule, HANDOVER_MONTH - 1)
         const remainingObligation = propertyPrice - paidToDeveloperSoFar
         const cashRealized = v36 - remainingObligation
@@ -181,7 +217,7 @@ export function runSimulation(inputs) {
         // instead of taking title.
         flipPortfolio = cashRealized - flipTax - dldFee
         flipExecuted = true
-        buyerCostThisMonth = 0 // no rent/milestone this month — the sale replaces it
+        investingContribution = 0 // no milestone this month — the sale replaces it
 
         // Where the flip payout actually came from — principal paid in
         // (net of the DLD fee, also cash sunk into this deal) vs. the
@@ -214,29 +250,35 @@ export function runSimulation(inputs) {
         const milestoneDue = amountDueInMonth(schedule, month)
         buyerPool = buyerPool * (1 + monthlyNetStockReturn) - milestoneDue
         paidToDeveloper += milestoneDue
-        // The buyer doesn't have a home yet during construction, so they
-        // also pay their own rent — out of the same float.
-        const rentDuringConstruction = month <= HANDOVER_MONTH ? rent : 0
-        buyerPool -= rentDuringConstruction
-        buyerCostThisMonth = milestoneDue + rentDuringConstruction
+        investingContribution = milestoneDue
+        // Nothing built/rentable yet during construction — no rent
+        // collected, so landlordSurplus stays untouched (0) here.
 
         if (month === HANDOVER_MONTH) handoverDone = true
       }
     } else if (isOffPlan && handoverDone) {
       // Possession transferred. Emaar/Damac are fully paid off by now — this
       // branch is only ever financially active for Danube's remaining
-      // 1%/month installments (months 37–80), offset by imputed rental
-      // income per spec. Carrying costs flow through buyerCostThisMonth
-      // (mirroring Ready property), not through buyerPool — buyerPool here
-      // is purely the leftover, never-needed float, or Danube's residual
-      // developer-financing arrangement.
+      // 1%/month installments (months 37–80), funded from buyerPool — the
+      // same pre-committed capital set aside at booking, already excluded
+      // from Buyer Net Worth. Unlike a Ready mortgage (external bank
+      // financing, paid from fresh cash each month, and split into
+      // interest/principal), Danube's installment is 0%-interest and
+      // funded from money the buyer already set aside — it must NOT also
+      // be subtracted from landlordSurplus, or it double-charges the same
+      // capital once via buyerPool's drawdown and again as a "landlord
+      // expense." Only carrying costs are a genuinely new, unfunded
+      // landlord expense here.
       const developerInstallment = amountDueInMonth(schedule, month)
-      const rentalIncomeCredit = developerInstallment > 0 ? (rentalYield / 100) * homeValue / 12 : 0
-      buyerPool = buyerPool * (1 + monthlyNetStockReturn) - developerInstallment + rentalIncomeCredit
+      buyerPool = buyerPool * (1 + monthlyNetStockReturn) - developerInstallment
       paidToDeveloper += developerInstallment
-      buyerCostThisMonth = developerInstallment - rentalIncomeCredit + monthlyCarryingCosts
+      const landlordCashFlow = collectedRent - monthlyCarryingCosts
+      landlordSurplus = landlordSurplus * (1 + monthlyNetStockReturn) + landlordCashFlow
+      investingContribution = developerInstallment
     } else {
-      // Ready property — mortgage-financed, exactly like a standard Buyer.
+      // Ready property — mortgage-financed, exactly like a standard Buyer,
+      // but now explicitly a landlord: rental income (net of vacancy) nets
+      // against the mortgage payment and carrying costs each month.
       let actualMortgagePayment = 0
       if (loanBalance > 0) {
         const interestPayment = loanBalance * monthlyMortgageRate
@@ -244,15 +286,15 @@ export function runSimulation(inputs) {
         loanBalance -= principalPayment
         actualMortgagePayment = interestPayment + principalPayment
       }
-      buyerCostThisMonth = actualMortgagePayment + monthlyCarryingCosts
+      const landlordCashFlow = collectedRent - actualMortgagePayment - monthlyCarryingCosts
+      landlordSurplus = landlordSurplus * (1 + monthlyNetStockReturn) + landlordCashFlow
+      investingContribution = actualMortgagePayment
     }
 
-    // Renter always pays their own rent every month, regardless of what the
-    // Buyer is doing; buyerCostThisMonth (0 once flipped) is the offsetting
-    // contribution mirroring whatever the Buyer spends on the property that
-    // month — applied bidirectionally, same convention as RentVsBuy.
+    // Investing matches only the capital that would have built home
+    // equity that month — no rent on either side of this comparison.
     renterPortfolio *= 1 + monthlyNetStockReturn
-    renterPortfolio += buyerCostThisMonth - rent
+    renterPortfolio += investingContribution
 
     if (month % 12 === 0) {
       const year = month / 12
@@ -272,9 +314,14 @@ export function runSimulation(inputs) {
       //   buyerNetWorth below — it's idle capital, not realized property
       //   value, until either the property is fully owned (folds into
       //   appreciation/equity naturally) or the deal is flipped (see below).
+      // - landlordSurplusSnapshot: the accumulated rental profit tracked
+      //   above — 0 during off-plan construction and for a flip (never
+      //   rentable), otherwise INCLUDED in buyerNetWorth, since it's
+      //   already-realized rental cash, not idle uncommitted capital.
       let costBasisEquity
       let appreciationGainNet
       let cashPortion
+      let landlordSurplusSnapshot = 0
 
       if (flipExecuted && month === HANDOVER_MONTH) {
         // The flip year itself: show where the payout actually came from
@@ -318,7 +365,8 @@ export function runSimulation(inputs) {
         costBasisEquity = propertyPrice - remainingBalance
         appreciationGainNet = appreciationGain - exitTax - homeValue * (sellingCostPct / 100)
         cashPortion = isOffPlan ? buyerPool : 0
-        buyerNetWorth = costBasisEquity + appreciationGainNet
+        landlordSurplusSnapshot = landlordSurplus
+        buyerNetWorth = costBasisEquity + appreciationGainNet + landlordSurplusSnapshot
       }
 
       data.push({
@@ -329,6 +377,7 @@ export function runSimulation(inputs) {
         buyerCostBasisEquity: Math.round(costBasisEquity),
         buyerAppreciationGain: Math.round(appreciationGainNet),
         buyerCashPortion: Math.round(cashPortion),
+        buyerLandlordSurplus: Math.round(landlordSurplusSnapshot),
       })
     }
   }

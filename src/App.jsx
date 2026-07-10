@@ -16,9 +16,11 @@ import { Check, Download, Info, Printer, RotateCcw, Save, Share2 } from 'lucide-
 import {
   ASSET_CLASS_APPRECIATION_DEFAULTS,
   ASSET_CLASS_SIZE_DEFAULTS,
+  POST_HANDOVER_APPRECIATION_DEFAULT,
   AIRPORT_BONUS_PCT,
   METRO_BONUS_PCT,
-  getEffectiveAppreciation,
+  getEffectivePreHandoverAppreciation,
+  getEffectivePostHandoverAppreciation,
   runSimulation,
 } from './simulation.js'
 import { CITIZENSHIP_OPTIONS, RESIDENCE_OPTIONS } from './taxEngine.js'
@@ -166,11 +168,13 @@ const DEFAULT_INPUTS = {
   propertyPrice: DEFAULT_PROPERTY_PRICE,
   monthlyRent: Math.round((DEFAULT_PROPERTY_PRICE * (DEFAULT_RENTAL_YIELD / 100)) / 12),
   rentInflation: 5,
+  vacancyRatePct: 5,
   rentalYield: DEFAULT_RENTAL_YIELD,
   assetClass: DEFAULT_ASSET_CLASS,
   nearMetro: false,
   nearAirport: false,
-  homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[DEFAULT_ASSET_CLASS],
+  preHandoverAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[DEFAULT_ASSET_CLASS],
+  postHandoverAppreciation: POST_HANDOVER_APPRECIATION_DEFAULT,
   propertyStatus: 'READY',
   developerPlan: 'EMAAR',
   exitStrategy: 'HOLD',
@@ -213,7 +217,7 @@ export default function App() {
       return {
         ...prev,
         assetClass,
-        homeAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[assetClass],
+        preHandoverAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[assetClass],
         propertySizeSqft: newSize,
         ...(yieldPct != null ? { rentalYield: yieldPct } : {}),
         ...(pricePerSqft != null ? { propertyPrice: newSize * pricePerSqft } : {}),
@@ -238,7 +242,8 @@ export default function App() {
     () => runSimulation(inputs),
     [inputs],
   )
-  const effectiveAppreciation = getEffectiveAppreciation(inputs)
+  const effectivePreHandoverAppreciation = getEffectivePreHandoverAppreciation(inputs)
+  const effectivePostHandoverAppreciation = getEffectivePostHandoverAppreciation(inputs)
   const isOffPlan = inputs.propertyStatus === 'OFFPLAN'
   const isFlip = isOffPlan && inputs.exitStrategy === 'FLIP'
   const flipYear = HANDOVER_MONTH / 12
@@ -415,14 +420,14 @@ export default function App() {
                 })()}
               />
               <Slider
-                label="Monthly Rent (comparable)"
+                label="Monthly Rent (Collected)"
                 value={inputs.monthlyRent}
                 onChange={setField('monthlyRent')}
                 min={1000}
                 max={100000}
                 step={250}
                 format={(v) => fmt(v)}
-                description={`Implied gross yield: ${computeGrossYieldPct(inputs.monthlyRent * 12, inputs.propertyPrice).toFixed(2)}% — compare against the Rental Yield assumption below.`}
+                description={`Implied gross yield: ${computeGrossYieldPct(inputs.monthlyRent * 12, inputs.propertyPrice).toFixed(2)}% before vacancy — compare against the Rental Yield assumption below. Reduced by the Vacancy Rate when computing rental surplus.`}
               />
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-300">Asset Class</label>
@@ -591,18 +596,36 @@ export default function App() {
             </SectionCard>
 
             <SectionCard title="Market Assumptions">
+              {isOffPlan && (
+                <Slider
+                  label="Pre-Handover Appreciation"
+                  value={inputs.preHandoverAppreciation}
+                  onChange={setField('preHandoverAppreciation')}
+                  min={0}
+                  max={30}
+                  step={0.5}
+                  format={(v) => `${v.toFixed(1)}%`}
+                  description={
+                    inputs.nearMetro || inputs.nearAirport
+                      ? `Effective rate with infrastructure bonuses: ${effectivePreHandoverAppreciation.toFixed(1)}%`
+                      : 'While under construction — Condo default 11%, Villa default 20%, set by Asset Class above, then freely adjustable.'
+                  }
+                />
+              )}
               <Slider
-                label="Base Home Appreciation"
-                value={inputs.homeAppreciation}
-                onChange={setField('homeAppreciation')}
+                label="Post-Handover Appreciation"
+                value={inputs.postHandoverAppreciation}
+                onChange={setField('postHandoverAppreciation')}
                 min={0}
-                max={30}
+                max={10}
                 step={0.5}
                 format={(v) => `${v.toFixed(1)}%`}
                 description={
                   inputs.nearMetro || inputs.nearAirport
-                    ? `Effective rate with infrastructure bonuses: ${effectiveAppreciation.toFixed(1)}%`
-                    : 'Condo default 11%, Villa default 20% — set by Asset Class above, then freely adjustable.'
+                    ? `Effective rate with infrastructure bonuses: ${effectivePostHandoverAppreciation.toFixed(1)}%`
+                    : isOffPlan
+                      ? 'Once owned outright — a completed, secondary-market property, appreciation normalizes toward general market growth.'
+                      : 'A Ready property is already handed over, so this is the only appreciation rate that applies.'
                 }
               />
               <Slider
@@ -615,9 +638,19 @@ export default function App() {
                 format={(v) => `${v.toFixed(1)}%`}
                 description={
                   getRentalYield(inputs.community, inputs.assetClass) != null
-                    ? `Set from Community + Asset Class above. Dubai average is ${DUBAI_AVERAGE_YIELD_PCT}%. Used to offset Danube-style post-handover installments.`
-                    : `Dubai average is ${DUBAI_AVERAGE_YIELD_PCT}% — no yield data for this Community + Asset Class combination, so this stays freely set. Used to offset Danube-style post-handover installments.`
+                    ? `Set from Community + Asset Class above. Dubai average is ${DUBAI_AVERAGE_YIELD_PCT}%. Informational — compare against the Monthly Rent input's implied yield above.`
+                    : `Dubai average is ${DUBAI_AVERAGE_YIELD_PCT}% — no yield data for this Community + Asset Class combination, so this stays freely set. Informational — compare against the Monthly Rent input's implied yield above.`
                 }
+              />
+              <Slider
+                label="Vacancy Rate"
+                value={inputs.vacancyRatePct}
+                onChange={setField('vacancyRatePct')}
+                min={5}
+                max={15}
+                step={0.5}
+                format={(v) => `${v.toFixed(1)}%`}
+                description="Share of time the unit sits empty between tenants — reduces collected rent only; the mortgage/installment and carrying costs still accrue in full."
               />
               <Slider
                 label="Rent Inflation"
@@ -687,7 +720,7 @@ export default function App() {
                   accentClass="text-white"
                   tooltip={
                     isOffPlan
-                      ? `Regular monthly developer milestone payment (excludes the 20% booking fee and any handover-time lump sum). ${PAYMENT_PLANS[inputs.developerPlan]?.label ?? ''} — Danube's continues through month 80, offset by rental income after handover.`
+                      ? `Regular monthly developer milestone payment (excludes the 20% booking fee and any handover-time lump sum). ${PAYMENT_PLANS[inputs.developerPlan]?.label ?? ''} — Danube's continues through month 80, alongside rental income tracked separately as Invested Rental Surplus.`
                       : undefined
                   }
                 />
@@ -695,13 +728,13 @@ export default function App() {
                   label={isFlip ? `Buyer Net Worth (at Flip, Yr ${flipYear})` : 'Buyer Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
                   accentClass={buyerWinsAt30 ? 'text-amber-400' : 'text-slate-300'}
-                  tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax. Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
+                  tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax — plus accumulated rental surplus (rent collected, net of vacancy, minus the mortgage/installment and carrying costs, reinvested). Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
                 />
                 <StatCard
                   label={isFlip ? `Renter Net Worth (at Flip, Yr ${flipYear})` : 'Renter Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
                   accentClass={!buyerWinsAt30 ? 'text-rose-400' : 'text-slate-300'}
-                  tooltip="Starting capital equal to the Buyer's own month-0 cash outlay, plus every month's difference between what the Buyer actually spends on the property and rent — compounding at your Global Tax Profile's net stock return."
+                  tooltip="Starting capital equal to the Buyer's own month-0 cash outlay, plus every month's mortgage payment (or off-plan developer installment) the Buyer would have put into building home equity — invested instead, compounding at your Global Tax Profile's net stock return. Rent isn't part of this comparison; it's the Buying side's own rental income (Invested Rental Surplus)."
                 />
                 {isFlip && (
                   <StatCard
@@ -787,7 +820,10 @@ export default function App() {
               <p className="mb-4 text-xs text-slate-500">
                 Cost-Basis Equity is what you've actually paid in (mortgage paydown or developer
                 milestones), at the original price. Appreciation Gain is the price-growth portion,
-                net of exit tax and selling costs. Together, these two are Buyer Net Worth — the
+                net of exit tax and selling costs. Invested Rental Surplus is the landlord's
+                accumulated rental profit — rent collected, net of vacancy, minus the mortgage (or
+                off-plan installment) and carrying costs — reinvested and compounding; it's real,
+                earned income, so it counts too. Together, these three are Buyer Net Worth — the
                 Buying line above.
                 {isOffPlan &&
                   " Cash / Uncommitted (shown for reference) is capital not yet tied up in the property — the off-plan float before handover — and is deliberately excluded from Buyer Net Worth, since it's idle capital, not realized property value."}
@@ -824,6 +860,7 @@ export default function App() {
                     <ReferenceLine y={0} stroke="#475569" />
                     <Bar dataKey="buyerCostBasisEquity" name="Cost-Basis Equity" stackId="buyer" fill="#f59e0b" />
                     <Bar dataKey="buyerAppreciationGain" name="Appreciation Gain" stackId="buyer" fill="#22c55e" />
+                    <Bar dataKey="buyerLandlordSurplus" name="Invested Rental Surplus" stackId="buyer" fill="#14b8a6" />
                     {isOffPlan && (
                       <Bar dataKey="buyerCashPortion" name="Cash / Uncommitted" stackId="buyer" fill="#94a3b8" />
                     )}
@@ -843,7 +880,8 @@ export default function App() {
         breakEvenYear={displayBreakEvenYear}
         finalYear={finalYear}
         displayCurrency={displayCurrency}
-        effectiveAppreciation={effectiveAppreciation}
+        effectivePreHandoverAppreciation={effectivePreHandoverAppreciation}
+        effectivePostHandoverAppreciation={effectivePostHandoverAppreciation}
         flipCAGR={flipCAGR}
         isFlip={isFlip}
         flipYear={flipYear}

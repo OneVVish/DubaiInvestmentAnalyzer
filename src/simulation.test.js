@@ -7,11 +7,13 @@ const base = {
   propertyPrice: 1000000,
   monthlyRent: 0,
   rentInflation: 0,
+  vacancyRatePct: 0,
   rentalYield: 6,
   assetClass: 'CONDO',
   nearMetro: false,
   nearAirport: false,
-  homeAppreciation: 0,
+  preHandoverAppreciation: 0,
+  postHandoverAppreciation: 0,
   propertyStatus: 'READY',
   developerPlan: 'EMAAR',
   exitStrategy: 'HOLD',
@@ -44,29 +46,32 @@ describe('runSimulation — Ready property', () => {
     expect(data[29]).toMatchObject({ year: 30, buyerNetWorth: 1000000, renterNetWorth: 1000000 })
   })
 
-  it('service charges are size x rate — an ongoing Buyer carrying cost, mirrored as Renter contributions', () => {
+  it('service charges are size x rate — a real landlord carrying cost that reduces Buyer Net Worth, leaving Investing untouched', () => {
     const noCharges = runSimulation(base)
     const withCharges = runSimulation({ ...base, propertySizeSqft: 1200, serviceChargeRate: 16 }) // Dubai Marina rate
     const annualCharge = 1200 * 16
-    // Carrying costs don't directly reduce the Buyer's home-equity net worth (same as
-    // mortgage/insurance/maintenance already work) — they flow through as Renter
-    // contributions instead, same delta mechanic used throughout.
-    expect(withCharges.data[0].buyerNetWorth).toBe(noCharges.data[0].buyerNetWorth)
-    expect(withCharges.data[0].renterNetWorth - noCharges.data[0].renterNetWorth).toBeCloseTo(annualCharge, 0)
+    // As a landlord, carrying costs paid without offsetting rental income are a real
+    // loss to Buyer Net Worth (via landlordSurplus) — unlike the old occupant model,
+    // they no longer mirror through to the Investing side at all (Investing now
+    // matches only the equity-building capital, not carrying costs).
+    expect(noCharges.data[0].buyerNetWorth - withCharges.data[0].buyerNetWorth).toBeCloseTo(annualCharge, 0)
+    expect(withCharges.data[0].renterNetWorth).toBe(noCharges.data[0].renterNetWorth)
   })
 
   // Appreciation now steps at months 1, 13, and 25 (starts immediately,
   // not after a full year) — so by year 3 (month 36), 3 steps have fired.
+  // Ready properties always use the post-handover rate — they have no
+  // construction phase.
   const YEAR3_HOME_VALUE_AT_50PCT = 1000000 * 1.5 ** 3
 
   it('a UAE tax-free profile owes no exit tax on a large gain', () => {
-    const { data } = runSimulation({ ...base, homeAppreciation: 50 })
+    const { data } = runSimulation({ ...base, postHandoverAppreciation: 50 })
     expect(data[2].homeValue).toBe(YEAR3_HOME_VALUE_AT_50PCT)
     expect(data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT) // full gain, no tax
   })
 
   it('a US citizen owes exit tax only on profit beyond the $250K USD exemption', () => {
-    const { data } = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'USA', taxResidence: 'UAE' })
+    const { data } = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'USA', taxResidence: 'UAE' })
     const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const taxableUSD = Math.max(0, profitAED / AED_PER_USD - 250000)
     const expectedTax = taxableUSD * AED_PER_USD * 0.15
@@ -75,14 +80,14 @@ describe('runSimulation — Ready property', () => {
   })
 
   it('UK and Canada residents owe zero exit tax even on a large gain (primary-residence relief)', () => {
-    const uk = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'UK', taxResidence: 'UK' })
-    const canada = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'UAE/Other', taxResidence: 'Canada' })
+    const uk = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'UK', taxResidence: 'UK' })
+    const canada = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'UAE/Other', taxResidence: 'Canada' })
     expect(uk.data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT)
     expect(canada.data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT)
   })
 
   it('India owes exit tax on the full profit, with no exemption', () => {
-    const { data } = runSimulation({ ...base, homeAppreciation: 50, citizenship: 'India', taxResidence: 'India' })
+    const { data } = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'India', taxResidence: 'India' })
     const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const expectedTax = profitAED * 0.125
     expect(data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - expectedTax, 0)
@@ -107,13 +112,28 @@ describe('runSimulation — Off-plan, Hold', () => {
     expect(data[2].buyerCashPortion).toBeCloseTo(440000, 0) // still tracked, just not counted
   })
 
-  it('Danube: rental yield income offsets the residual float, but that float stays outside Buyer Net Worth', () => {
-    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE', rentalYield: 6 })
-    // Fully paid off by month 80 (56% by handover + 44% over the next 44 months) -> cost-basis equity
-    // reaches the full 1,000,000 with 0% appreciation; the 220,000 rental-income-offset leftover (see the
-    // prior version of this test) is real money, tracked in buyerCashPortion, but no longer part of net worth.
+  it('Danube: fully paid off by month 80, with no float left over once the last installment lands', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
+    // Fully paid off by month 80 (56% by handover + 44% over the next 44 months) -> cost-basis
+    // equity reaches the full 1,000,000 with 0% appreciation, 0% rent (base). No imputed rental
+    // credit is added to the float anymore, so it exactly zeroes out once the installments end.
     expect(data[6].buyerNetWorth).toBe(1000000) // year 7 = month 84, 4 months after month 80 payoff
-    expect(data[6].buyerCashPortion).toBeCloseTo(220000, 0)
+    expect(data[6].buyerCashPortion).toBeCloseTo(0, 0)
+  })
+
+  it('Danube: rentalYield input no longer feeds the computation — real Monthly Rent does, via landlordSurplus', () => {
+    const withYield = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE', rentalYield: 6 })
+    const withoutYield = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE', rentalYield: 0 })
+    expect(withYield.data[6]).toEqual(withoutYield.data[6]) // purely informational now
+
+    const withRent = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'DANUBE',
+      monthlyRent: 8000,
+      vacancyRatePct: 5,
+    })
+    expect(withRent.data[6].buyerLandlordSurplus).not.toBe(0) // real rent does move the needle
   })
 })
 
@@ -142,14 +162,14 @@ describe('runSimulation — DLD transfer fee', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       dldFeePct: 4,
     })
     const noFee = runSimulation({
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       dldFeePct: 0,
     })
     expect(noFee.data[2].buyerNetWorth - withFee.data[2].buyerNetWorth).toBeCloseTo(40000, 0)
@@ -174,7 +194,7 @@ describe('runSimulation — DLD transfer fee', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       dldFeePct: 4,
       dldWaiverPct: 0,
     })
@@ -182,7 +202,7 @@ describe('runSimulation — DLD transfer fee', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       dldFeePct: 4,
       dldWaiverPct: 100,
     })
@@ -194,7 +214,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('matches the spec formulas for V36, cashRealized, and profit (tax-free)', () => {
     const { data } = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
@@ -208,7 +228,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('CAGR is a true IRR — exceeds the naive lump-sum CAGR, since staged installments had less time to grow', () => {
     const { data, flipCAGR } = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
@@ -222,7 +242,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('CAGR matches an independently-built monthly cash-flow IRR', () => {
     const { flipCAGR } = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
@@ -245,7 +265,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('a flipped contract loses its primary-residence exemption — US flat 15%, no $250K exemption', () => {
     const free = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       citizenship: 'UAE/Other',
@@ -253,7 +273,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     })
     const us = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       citizenship: 'USA',
@@ -266,7 +286,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('UK flip tax uses the 20% rate (same as the stock drag rate), unlike a 0% held exit', () => {
     const uk = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       citizenship: 'UK',
@@ -274,7 +294,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     })
     const free = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       citizenship: 'UAE/Other',
@@ -287,7 +307,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   it('after flipping, the buyer path simply compounds and no longer tracks home equity', () => {
     const { data } = runSimulation({
       ...base,
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       stockReturn: 8,
@@ -297,21 +317,26 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
 })
 
 describe('runSimulation — equity vs appreciation breakdown', () => {
-  // Buyer Net Worth is strictly Cost-Basis Equity + Appreciation Gain —
-  // Cash/Uncommitted is tracked (for the breakdown chart) but deliberately
-  // excluded, since it's idle capital, not realized property value. Not
-  // true for a flip, where the cash IS the realized, cashed-out value —
-  // see the dedicated Flip test below instead.
+  // Buyer Net Worth is Cost-Basis Equity + Appreciation Gain + Landlord
+  // Surplus (accumulated rental profit — 0 whenever `base`'s monthlyRent:
+  // 0 is left untouched, which is most of these tests). Cash/Uncommitted
+  // is tracked (for the breakdown chart) but deliberately excluded, since
+  // it's idle capital, not realized property value. Not true for a flip,
+  // where the cash IS the realized, cashed-out value — see the dedicated
+  // Flip test below instead.
   // Precision -1 (tolerance < 5) absorbs the +/-1-2 AED drift from rounding
   // each component independently, vs. rounding the total once.
   const equityPlusAppreciationEqualsNetWorth = (row) =>
-    expect(row.buyerCostBasisEquity + row.buyerAppreciationGain).toBeCloseTo(row.buyerNetWorth, -1)
+    expect(row.buyerCostBasisEquity + row.buyerAppreciationGain + row.buyerLandlordSurplus).toBeCloseTo(
+      row.buyerNetWorth,
+      -1,
+    )
 
   it('Ready, mortgaged, with appreciation and a US exit tax: equity + appreciation always equal net worth', () => {
     const { data } = runSimulation({
       ...base,
       downPaymentPct: 20,
-      homeAppreciation: 8,
+      postHandoverAppreciation: 8,
       citizenship: 'USA',
       taxResidence: 'UAE',
     })
@@ -327,7 +352,7 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
   })
 
   it('Ready: appreciation gain is the full price growth when paid in cash (no loan to net against)', () => {
-    const { data } = runSimulation({ ...base, homeAppreciation: 10 })
+    const { data } = runSimulation({ ...base, postHandoverAppreciation: 10 })
     expect(data[2].buyerCostBasisEquity).toBe(1000000) // fully paid, no mortgage
     // Year 3 (month 36) has had 3 annual step-ups (months 1, 13, 25 —
     // appreciation starts immediately, unlike rent/cost inflation).
@@ -336,7 +361,12 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
   })
 
   it('Off-Plan construction: cost-basis equity is what has actually been paid to the developer', () => {
-    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'EMAAR', homeAppreciation: 10 })
+    const { data } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      preHandoverAppreciation: 10,
+    })
     // Year 1 (month 12): booking (20%) + 12 monthly installments already paid.
     const paidByMonth12 = 200000 + 12 * ((600000 / 36))
     expect(data[0].buyerCostBasisEquity).toBeCloseTo(paidByMonth12, 0)
@@ -354,7 +384,7 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
       propertyPrice: 2500000,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'EMAAR',
-      homeAppreciation: 20,
+      preHandoverAppreciation: 20,
     })
     // Year 1 (month 12): one appreciation step already fired (at month 1).
     const expectedHomeValue = 2500000 * 1.2
@@ -367,10 +397,27 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'DANUBE',
-      homeAppreciation: 6,
+      preHandoverAppreciation: 6,
+      postHandoverAppreciation: 6,
       rentalYield: 6,
     })
     data.forEach(equityPlusAppreciationEqualsNetWorth)
+  })
+
+  it('switches from the pre- to the post-handover rate exactly at handover', () => {
+    const { data } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      preHandoverAppreciation: 20,
+      postHandoverAppreciation: 5,
+    })
+    // 3 pre-handover steps by year 3 (months 1, 13, 25) at 20%, then the
+    // month-37 step (year 4) is the first to use the post-handover rate.
+    const year3 = 1000000 * 1.2 ** 3
+    const year4 = year3 * 1.05
+    expect(data[2].homeValue).toBe(Math.round(year3))
+    expect(data[3].homeValue).toBe(Math.round(year4))
   })
 
   it('Flip year: the payout is attributed back to equity paid in vs. appreciation gain, not dumped into cash', () => {
@@ -378,7 +425,7 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
     })
     const paidByMonth35 = 1000000 - 216666.6666667 // same Emaar figure used elsewhere in this file
     const v36 = 1000000 * 1.1 ** 3
@@ -394,7 +441,7 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
-      homeAppreciation: 10,
+      preHandoverAppreciation: 10,
       stockReturn: 8,
     })
     expect(data[3].buyerCostBasisEquity).toBe(0)
@@ -404,17 +451,83 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
 })
 
 describe('runSimulation — appreciation modifiers', () => {
-  it('villa defaults appreciate faster than condo when using the asset-class default', () => {
-    const condo = runSimulation({ ...base, assetClass: 'CONDO', homeAppreciation: 11 })
-    const villa = runSimulation({ ...base, assetClass: 'VILLA', homeAppreciation: 20 })
-    expect(villa.data[10].homeValue).toBeGreaterThan(condo.data[10].homeValue)
+  it('higher post-handover appreciation grows a Ready property faster', () => {
+    const lower = runSimulation({ ...base, postHandoverAppreciation: 5 })
+    const higher = runSimulation({ ...base, postHandoverAppreciation: 10 })
+    expect(higher.data[10].homeValue).toBeGreaterThan(lower.data[10].homeValue)
   })
 
   it('infrastructure bonuses increase appreciation beyond the base slider', () => {
-    const plain = runSimulation({ ...base, homeAppreciation: 5 })
-    const withMetro = runSimulation({ ...base, homeAppreciation: 5, nearMetro: true })
-    const withBoth = runSimulation({ ...base, homeAppreciation: 5, nearMetro: true, nearAirport: true })
+    const plain = runSimulation({ ...base, postHandoverAppreciation: 5 })
+    const withMetro = runSimulation({ ...base, postHandoverAppreciation: 5, nearMetro: true })
+    const withBoth = runSimulation({ ...base, postHandoverAppreciation: 5, nearMetro: true, nearAirport: true })
     expect(withMetro.data[5].homeValue).toBeGreaterThan(plain.data[5].homeValue)
     expect(withBoth.data[5].homeValue).toBeGreaterThan(withMetro.data[5].homeValue)
+  })
+
+  it('infrastructure bonuses also apply to the pre-handover rate during off-plan construction', () => {
+    const plain = runSimulation({ ...base, propertyStatus: 'OFFPLAN', preHandoverAppreciation: 10 })
+    const withBoth = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      preHandoverAppreciation: 10,
+      nearMetro: true,
+      nearAirport: true,
+    })
+    expect(withBoth.data[0].homeValue).toBeGreaterThan(plain.data[0].homeValue)
+  })
+})
+
+describe('runSimulation — Buying as landlord, Investing matches only equity capital', () => {
+  it('a 100%-cash Ready property produces a single lump-sum Investing comparison, with no further monthly additions', () => {
+    const { data } = runSimulation({ ...base, downPaymentPct: 100, stockReturn: 8 })
+    // Pure compounding of the lump sum, no periodic mortgage contribution —
+    // consecutive years grow by the same ratio.
+    const growthYear1to2 = data[1].renterNetWorth / data[0].renterNetWorth
+    const growthYear2to3 = data[2].renterNetWorth / data[1].renterNetWorth
+    expect(growthYear1to2).toBeCloseTo(growthYear2to3, 4)
+    expect(data[0].renterNetWorth).toBeGreaterThan(1000000)
+  })
+
+  it("Investing's Ready-property contribution equals the full mortgage P&I", () => {
+    const { data, mortgagePayment, downPayment } = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5 })
+    // 0% stock return in `base`, so year 1's renterNetWorth is just the starting
+    // capital plus 12 months of the exact mortgage payment — no compounding to
+    // account for, and no carrying costs mixed in (those are landlordSurplus's).
+    expect(data[0].renterNetWorth).toBeCloseTo(downPayment + mortgagePayment * 12, 0)
+  })
+
+  it('a mortgaged Ready property accumulates landlordSurplus = collected rent minus mortgage payment minus carrying costs', () => {
+    const monthlyRent = 5000
+    const vacancyRatePct = 10
+    const { data, mortgagePayment } = runSimulation({
+      ...base,
+      downPaymentPct: 20,
+      mortgageRate: 5,
+      monthlyRent,
+      vacancyRatePct,
+      homeInsuranceAnnual: 1200,
+      yearlyMaintenance: 2400,
+    })
+    const collectedRent = monthlyRent * (1 - vacancyRatePct / 100)
+    const monthlyCarryingCosts = 1200 / 12 + 2400 / 12
+    const expectedMonthlySurplus = collectedRent - mortgagePayment - monthlyCarryingCosts
+    expect(data[0].buyerLandlordSurplus).toBeCloseTo(expectedMonthlySurplus * 12, 0) // 0% stock return, so a simple sum
+  })
+
+  it('higher vacancy strictly lowers landlordSurplus (and Buyer Net Worth) without touching equity, appreciation, or Investing', () => {
+    const lowVacancy = runSimulation({ ...base, downPaymentPct: 20, monthlyRent: 5000, vacancyRatePct: 5 })
+    const highVacancy = runSimulation({ ...base, downPaymentPct: 20, monthlyRent: 5000, vacancyRatePct: 15 })
+    expect(highVacancy.data[0].buyerLandlordSurplus).toBeLessThan(lowVacancy.data[0].buyerLandlordSurplus)
+    expect(highVacancy.data[0].buyerNetWorth).toBeLessThan(lowVacancy.data[0].buyerNetWorth)
+    expect(highVacancy.data[0].buyerCostBasisEquity).toBe(lowVacancy.data[0].buyerCostBasisEquity)
+    expect(highVacancy.data[0].buyerAppreciationGain).toBe(lowVacancy.data[0].buyerAppreciationGain)
+    expect(highVacancy.data[0].renterNetWorth).toBe(lowVacancy.data[0].renterNetWorth)
+  })
+
+  it('off-plan pre-handover: rent no longer reduces the buyer float — construction-phase numbers are unaffected by Monthly Rent', () => {
+    const withRent = runSimulation({ ...base, propertyStatus: 'OFFPLAN', monthlyRent: 5000 })
+    const noRent = runSimulation({ ...base, propertyStatus: 'OFFPLAN', monthlyRent: 0 })
+    expect(withRent.data[0]).toEqual(noRent.data[0])
   })
 })
