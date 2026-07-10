@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TAX_PROFILES, getNetStockReturn, resolveTaxProfile } from './taxEngine.js'
+import { TAX_PROFILES, getNetStockReturn, resolveTaxProfile, computeRentalIncomeTaxPct } from './taxEngine.js'
 
 describe('resolveTaxProfile', () => {
   it('resolves a UAE citizen resident in the UAE as tax-free', () => {
@@ -33,5 +33,24 @@ describe('getNetStockReturn', () => {
 
   it('applies the India drag', () => {
     expect(getNetStockReturn(8, TAX_PROFILES.INDIA)).toBeCloseTo(7, 6)
+  })
+})
+
+describe('computeRentalIncomeTaxPct', () => {
+  it('US and Canada sum Federal + State/Provincial marginal rates', () => {
+    const inputs = { marginalTaxRateFed: 37, marginalTaxRateState: 13.3, marginalTaxRateSingle: 45 }
+    expect(computeRentalIncomeTaxPct(inputs, TAX_PROFILES.US)).toBeCloseTo(50.3, 6)
+    expect(computeRentalIncomeTaxPct(inputs, TAX_PROFILES.CANADA)).toBeCloseTo(50.3, 6)
+  })
+
+  it('UK and India use the single marginal rate, ignoring Fed/State', () => {
+    const inputs = { marginalTaxRateFed: 37, marginalTaxRateState: 13.3, marginalTaxRateSingle: 30 }
+    expect(computeRentalIncomeTaxPct(inputs, TAX_PROFILES.UK)).toBe(30)
+    expect(computeRentalIncomeTaxPct(inputs, TAX_PROFILES.INDIA)).toBe(30)
+  })
+
+  it('the tax-free profile ignores all rate inputs — always 0%', () => {
+    const inputs = { marginalTaxRateFed: 37, marginalTaxRateState: 13.3, marginalTaxRateSingle: 45 }
+    expect(computeRentalIncomeTaxPct(inputs, TAX_PROFILES.FREE)).toBe(0)
   })
 })

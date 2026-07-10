@@ -23,7 +23,13 @@ import {
   getEffectivePostHandoverAppreciation,
   runSimulation,
 } from './simulation.js'
-import { CITIZENSHIP_OPTIONS, RESIDENCE_OPTIONS } from './taxEngine.js'
+import {
+  CITIZENSHIP_OPTIONS,
+  RESIDENCE_OPTIONS,
+  DEFAULT_TAX_RATES,
+  resolveTaxProfile,
+  computeRentalIncomeTaxPct,
+} from './taxEngine.js'
 import { HANDOVER_MONTH, PAYMENT_PLANS, amountDueInMonth, buildMilestoneSchedule } from './paymentPlans.js'
 import { COMMUNITIES } from './communities.js'
 import { computeAnnualServiceCharges, getServiceChargeRate } from './serviceCharges.js'
@@ -191,9 +197,10 @@ const DEFAULT_INPUTS = {
   dldFeePct: 4,
   dldWaiverPct: 0,
   stockReturn: 7,
-  citizenship: 'UAE/Other',
-  taxResidence: 'UAE',
+  citizenship: 'USA',
+  taxResidence: 'USA',
   isPrimaryResidence: false,
+  ...DEFAULT_TAX_RATES.US,
 }
 
 const CITIZENSHIP_LABELS = { USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', 'UAE/Other': 'UAE / Other' }
@@ -240,12 +247,33 @@ export default function App() {
       }
     })
 
+  // Citizenship/Tax Residence together resolve to a tax profile (see
+  // resolveTaxProfile) — whichever one changes, re-resolve with the OTHER
+  // field's current value and snap the marginal/capital-gains rate inputs
+  // to that profile's default top-bracket figures (DEFAULT_TAX_RATES),
+  // same cascading-default pattern as Community/Asset Class above. Still
+  // freely adjustable afterward.
+  const applyTaxProfileDefaults = (prev, citizenship, taxResidence) => ({
+    ...prev,
+    citizenship,
+    taxResidence,
+    ...DEFAULT_TAX_RATES[resolveTaxProfile(citizenship, taxResidence).key],
+  })
+
+  const handleCitizenshipChange = (citizenship) =>
+    setInputs((prev) => applyTaxProfileDefaults(prev, citizenship, prev.taxResidence))
+
+  const handleTaxResidenceChange = (taxResidence) =>
+    setInputs((prev) => applyTaxProfileDefaults(prev, prev.citizenship, taxResidence))
+
   const { data, mortgagePayment, downPayment, breakEvenYear, flipCAGR } = useMemo(
     () => runSimulation(inputs),
     [inputs],
   )
   const effectivePreHandoverAppreciation = getEffectivePreHandoverAppreciation(inputs)
   const effectivePostHandoverAppreciation = getEffectivePostHandoverAppreciation(inputs)
+  const taxProfile = resolveTaxProfile(inputs.citizenship, inputs.taxResidence)
+  const rentalIncomeTaxPct = computeRentalIncomeTaxPct(inputs, taxProfile)
   const isOffPlan = inputs.propertyStatus === 'OFFPLAN'
   const isFlip = isOffPlan && inputs.exitStrategy === 'FLIP'
   const flipYear = HANDOVER_MONTH / 12
@@ -680,16 +708,69 @@ export default function App() {
               <Dropdown
                 label="Citizenship"
                 value={inputs.citizenship}
-                onChange={setField('citizenship')}
+                onChange={handleCitizenshipChange}
                 options={CITIZENSHIP_OPTIONS.map((c) => ({ value: c, label: CITIZENSHIP_LABELS[c] }))}
               />
               <Dropdown
                 label="Tax Residence"
                 value={inputs.taxResidence}
-                onChange={setField('taxResidence')}
+                onChange={handleTaxResidenceChange}
                 options={RESIDENCE_OPTIONS.map((r) => ({ value: r, label: RESIDENCE_LABELS[r] }))}
                 description="US citizenship carries US tax exposure regardless of residence."
               />
+              {(taxProfile.key === 'US' || taxProfile.key === 'CANADA') && (
+                <>
+                  <Slider
+                    label="Federal Marginal Tax Rate"
+                    value={inputs.marginalTaxRateFed}
+                    onChange={setField('marginalTaxRateFed')}
+                    min={0}
+                    max={50}
+                    step={0.5}
+                    format={(v) => `${v.toFixed(1)}%`}
+                    description="Your own income-tax bracket, applied to net rental cash flow (rent minus mortgage/installment and carrying costs) when positive — not the stock-return drag rate above."
+                  />
+                  <Slider
+                    label={taxProfile.key === 'US' ? 'State Marginal Tax Rate' : 'Provincial Marginal Tax Rate'}
+                    value={inputs.marginalTaxRateState}
+                    onChange={setField('marginalTaxRateState')}
+                    min={0}
+                    max={25}
+                    step={0.5}
+                    format={(v) => `${v.toFixed(1)}%`}
+                    description={`Combined marginal rate on rental income: ${rentalIncomeTaxPct.toFixed(1)}% (Federal + ${taxProfile.key === 'US' ? 'State' : 'Provincial'}).`}
+                  />
+                </>
+              )}
+              {(taxProfile.key === 'UK' || taxProfile.key === 'INDIA') && (
+                <Slider
+                  label="Marginal Tax Rate"
+                  value={inputs.marginalTaxRateSingle}
+                  onChange={setField('marginalTaxRateSingle')}
+                  min={0}
+                  max={50}
+                  step={0.5}
+                  format={(v) => `${v.toFixed(1)}%`}
+                  description={`Your own income-tax bracket, applied to net rental cash flow (rent minus mortgage/installment and carrying costs) when positive — not the stock-return drag rate above. Effective rate: ${rentalIncomeTaxPct.toFixed(1)}%.`}
+                />
+              )}
+              {taxProfile.key === 'FREE' && (
+                <p className="text-xs text-slate-500">
+                  No rental income tax applies for this Global Tax Profile (UAE / Tax-Free).
+                </p>
+              )}
+              {taxProfile.key !== 'FREE' && (
+                <Slider
+                  label="Capital Gains Tax Rate"
+                  value={inputs.capitalGainsTaxRatePct}
+                  onChange={setField('capitalGainsTaxRatePct')}
+                  min={0}
+                  max={50}
+                  step={0.1}
+                  format={(v) => `${v.toFixed(1)}%`}
+                  description="Applied to the property's appreciation gain on a Hold exit that isn't a Personal Primary Residence, and always on a Flip. A genuine Personal Primary Residence (toggle below) instead uses statutory relief, not this rate."
+                />
+              )}
               <Toggle
                 label="Personal Primary Residence"
                 description="I will live here, not rent it out — unlocks primary-residence tax relief (US $250K exemption, UK/Canada 0% CGT). Off by default, since the Dubai Property choice models a rental throughout; when off, a Hold exit is taxed at the same rate as a Flip."

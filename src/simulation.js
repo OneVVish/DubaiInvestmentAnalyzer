@@ -1,4 +1,4 @@
-import { resolveTaxProfile, getNetStockReturn } from './taxEngine.js'
+import { resolveTaxProfile, getNetStockReturn, computeRentalIncomeTaxPct } from './taxEngine.js'
 import {
   buildMilestoneSchedule,
   amountDueInMonth,
@@ -59,12 +59,12 @@ export function getEffectivePostHandoverAppreciation(inputs) {
 // requires actually living there — it does NOT apply to a rental, which is
 // this app's default framing (Buying collects rent throughout). So unless
 // the user explicitly marks it a Personal Primary Residence, this uses the
-// same non-primary-residence rate already charged on a Flip, with no
-// exemption — only the opt-in path applies exitTaxPct/exemptionUSD.
-function computeHoldExitTax(profit, taxProfile, isPrimaryResidence) {
+// user's own Capital Gains Tax Rate input, with no exemption — only the
+// opt-in path applies exitTaxPct/exemptionUSD.
+function computeHoldExitTax(profit, taxProfile, isPrimaryResidence, capitalGainsTaxRatePct) {
   if (profit <= 0) return 0
   if (!isPrimaryResidence) {
-    return profit * (taxProfile.flipExitTaxPct / 100)
+    return profit * (capitalGainsTaxRatePct / 100)
   }
   let taxableProfit = profit
   if (taxProfile.exemptionUSD) {
@@ -75,10 +75,19 @@ function computeHoldExitTax(profit, taxProfile, isPrimaryResidence) {
 }
 
 // A flipped off-plan contract was never occupied, so no citizenship keeps a
-// primary-residence exemption — flat rate, no exemption, on the full profit.
-function computeFlipExitTax(profit, taxProfile) {
+// primary-residence exemption — the user's own Capital Gains Tax Rate,
+// flat, no exemption, on the full profit.
+function computeFlipExitTax(profit, capitalGainsTaxRatePct) {
   if (profit <= 0) return 0
-  return profit * (taxProfile.flipExitTaxPct / 100)
+  return profit * (capitalGainsTaxRatePct / 100)
+}
+
+// Rental income is only taxed when it's actually a profit that month — a
+// rental loss (negative cash flow) isn't taxed, matching how the exit-tax
+// helpers above only ever tax positive profit.
+function applyRentalIncomeTax(landlordCashFlow, rentalIncomeTaxPct) {
+  const tax = landlordCashFlow > 0 ? landlordCashFlow * (rentalIncomeTaxPct / 100) : 0
+  return landlordCashFlow - tax
 }
 
 export function runSimulation(inputs) {
@@ -105,11 +114,13 @@ export function runSimulation(inputs) {
     citizenship,
     taxResidence,
     isPrimaryResidence,
+    capitalGainsTaxRatePct,
   } = inputs
 
   const taxProfile = resolveTaxProfile(citizenship, taxResidence)
   const netStockReturn = getNetStockReturn(stockReturn, taxProfile)
   const monthlyNetStockReturn = Math.pow(1 + netStockReturn / 100, 1 / 12) - 1
+  const rentalIncomeTaxPct = computeRentalIncomeTaxPct(inputs, taxProfile)
   const effectivePreHandoverAppreciation = getEffectivePreHandoverAppreciation(inputs)
   const effectivePostHandoverAppreciation = getEffectivePostHandoverAppreciation(inputs)
   const monthlyMortgageRate = mortgageRate / 100 / 12
@@ -231,7 +242,7 @@ export function runSimulation(inputs) {
         const remainingObligation = propertyPrice - paidToDeveloperSoFar
         const cashRealized = v36 - remainingObligation
         const profit = v36 - propertyPrice
-        const flipTax = computeFlipExitTax(profit, taxProfile)
+        const flipTax = computeFlipExitTax(profit, capitalGainsTaxRatePct)
         // The DLD fee was already paid at booking regardless of what happens
         // at handover — it doesn't come back just because the buyer flips
         // instead of taking title.
@@ -293,7 +304,8 @@ export function runSimulation(inputs) {
       buyerPool = buyerPool * (1 + monthlyNetStockReturn) - developerInstallment
       paidToDeveloper += developerInstallment
       const landlordCashFlow = collectedRent - monthlyCarryingCosts
-      landlordSurplus = landlordSurplus * (1 + monthlyNetStockReturn) + landlordCashFlow
+      landlordSurplus =
+        landlordSurplus * (1 + monthlyNetStockReturn) + applyRentalIncomeTax(landlordCashFlow, rentalIncomeTaxPct)
       investingContribution = developerInstallment
     } else {
       // Ready property — mortgage-financed, exactly like a standard Buyer,
@@ -307,7 +319,8 @@ export function runSimulation(inputs) {
         actualMortgagePayment = interestPayment + principalPayment
       }
       const landlordCashFlow = collectedRent - actualMortgagePayment - monthlyCarryingCosts
-      landlordSurplus = landlordSurplus * (1 + monthlyNetStockReturn) + landlordCashFlow
+      landlordSurplus =
+        landlordSurplus * (1 + monthlyNetStockReturn) + applyRentalIncomeTax(landlordCashFlow, rentalIncomeTaxPct)
       investingContribution = actualMortgagePayment
     }
 
@@ -381,7 +394,7 @@ export function runSimulation(inputs) {
         // remaining developer/mortgage balance, and the exit tax.
         const remainingBalance = isOffPlan ? Math.max(0, propertyPrice - paidToDeveloper) : loanBalance
         const appreciationGain = homeValue - propertyPrice
-        const exitTax = computeHoldExitTax(appreciationGain, taxProfile, isPrimaryResidence)
+        const exitTax = computeHoldExitTax(appreciationGain, taxProfile, isPrimaryResidence, capitalGainsTaxRatePct)
         costBasisEquity = propertyPrice - remainingBalance
         appreciationGainNet = appreciationGain - exitTax - homeValue * (sellingCostPct / 100)
         cashPortion = isOffPlan ? buyerPool : 0

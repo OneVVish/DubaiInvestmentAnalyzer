@@ -14,6 +14,7 @@ import { formatCurrency } from './format.js'
 import { PAYMENT_PLANS } from './paymentPlans.js'
 import { COMMUNITIES } from './communities.js'
 import { computeAnnualServiceCharges } from './serviceCharges.js'
+import { resolveTaxProfile } from './taxEngine.js'
 
 const CITIZENSHIP_LABELS = { USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', 'UAE/Other': 'UAE / Other' }
 const RESIDENCE_LABELS = { UAE: 'UAE', USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', Other: 'Other' }
@@ -45,6 +46,7 @@ export default function PrintReport({
   const buyerWinsAt30 = finalYear && finalYear.buyerNetWorth > finalYear.renterNetWorth
   const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
   const isOffPlan = inputs.propertyStatus === 'OFFPLAN'
+  const taxProfile = resolveTaxProfile(inputs.citizenship, inputs.taxResidence)
   const generatedOn = new Date().toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
@@ -293,6 +295,21 @@ export default function PrintReport({
           </h2>
           <InputRow label="Citizenship" value={CITIZENSHIP_LABELS[inputs.citizenship] ?? inputs.citizenship} />
           <InputRow label="Tax Residence" value={RESIDENCE_LABELS[inputs.taxResidence] ?? inputs.taxResidence} />
+          {(taxProfile.key === 'US' || taxProfile.key === 'CANADA') && (
+            <>
+              <InputRow label="Federal Marginal Tax Rate" value={`${inputs.marginalTaxRateFed.toFixed(1)}%`} />
+              <InputRow
+                label={taxProfile.key === 'US' ? 'State Marginal Tax Rate' : 'Provincial Marginal Tax Rate'}
+                value={`${inputs.marginalTaxRateState.toFixed(1)}%`}
+              />
+            </>
+          )}
+          {(taxProfile.key === 'UK' || taxProfile.key === 'INDIA') && (
+            <InputRow label="Marginal Tax Rate" value={`${inputs.marginalTaxRateSingle.toFixed(1)}%`} />
+          )}
+          {taxProfile.key !== 'FREE' && (
+            <InputRow label="Capital Gains Tax Rate" value={`${inputs.capitalGainsTaxRatePct.toFixed(1)}%`} />
+          )}
           <InputRow label="Personal Primary Residence" value={inputs.isPrimaryResidence ? 'Yes' : 'No'} />
 
           <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">

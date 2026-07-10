@@ -32,6 +32,10 @@ const base = {
   citizenship: 'UAE/Other',
   taxResidence: 'UAE',
   isPrimaryResidence: false,
+  marginalTaxRateFed: 0,
+  marginalTaxRateState: 0,
+  marginalTaxRateSingle: 0,
+  capitalGainsTaxRatePct: 0,
 }
 
 describe('calculateMortgagePayment', () => {
@@ -106,23 +110,43 @@ describe('runSimulation — Ready property', () => {
   })
 
   it('India owes exit tax on the full profit, with no exemption, regardless of the Personal Primary Residence toggle', () => {
-    const { data } = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'India', taxResidence: 'India' })
+    const { data } = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'India',
+      taxResidence: 'India',
+      capitalGainsTaxRatePct: 12.5, // India's real LTCG rate — happens to equal exitTaxPct too, so the toggle is moot
+    })
     const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const expectedTax = profitAED * 0.125
     expect(data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - expectedTax, 0)
   })
 
-  it('by default (not a Personal Primary Residence), a Hold exit is taxed at the same rate as a Flip — no primary-residence relief', () => {
+  it("by default (not a Personal Primary Residence), a Hold exit is taxed at the user's own Capital Gains Tax Rate — no primary-residence relief", () => {
     // Buying now models a landlord throughout, so the default (isPrimaryResidence:
-    // false, inherited from `base`) forfeits primary-residence relief for US/UK/
-    // Canada — same rate as an off-plan Flip, no exemption.
-    const us = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'USA', taxResidence: 'UAE' })
-    const uk = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'UK', taxResidence: 'UK' })
+    // false, inherited from `base`) forfeits primary-residence relief — a Hold
+    // exit uses the same user-supplied capitalGainsTaxRatePct as a Flip, no
+    // exemption, regardless of citizenship.
+    const us = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'USA',
+      taxResidence: 'UAE',
+      capitalGainsTaxRatePct: 15,
+    })
+    const uk = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'UK',
+      taxResidence: 'UK',
+      capitalGainsTaxRatePct: 20,
+    })
     const canada = runSimulation({
       ...base,
       postHandoverAppreciation: 50,
       citizenship: 'UAE/Other',
       taxResidence: 'Canada',
+      capitalGainsTaxRatePct: 15,
     })
     const profit = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     expect(us.data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - profit * 0.15, 0)
@@ -306,7 +330,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     expect(runSimulation({ ...base, propertyStatus: 'OFFPLAN', exitStrategy: 'HOLD' }).flipCAGR).toBeNull()
   })
 
-  it('a flipped contract loses its primary-residence exemption — US flat 15%, no $250K exemption', () => {
+  it('a flipped contract loses its primary-residence exemption — taxed at the Capital Gains Tax Rate, no $250K exemption', () => {
     const free = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
@@ -322,12 +346,13 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
       exitStrategy: 'FLIP',
       citizenship: 'USA',
       taxResidence: 'UAE',
+      capitalGainsTaxRatePct: 15,
     })
     const profit = 1000000 * 1.1 ** 3 - 1000000
     expect(free.data[2].buyerNetWorth - us.data[2].buyerNetWorth).toBeCloseTo(profit * 0.15, 0)
   })
 
-  it('UK flip tax uses the 20% rate (same as the stock drag rate, and the same as a non-primary-residence held exit)', () => {
+  it('a Flip is taxed at whatever Capital Gains Tax Rate the user set, unlike a primary-residence Hold exit', () => {
     const uk = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
@@ -335,6 +360,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
       exitStrategy: 'FLIP',
       citizenship: 'UK',
       taxResidence: 'UK',
+      capitalGainsTaxRatePct: 20,
     })
     const free = runSimulation({
       ...base,
@@ -383,6 +409,7 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
       postHandoverAppreciation: 8,
       citizenship: 'USA',
       taxResidence: 'UAE',
+      capitalGainsTaxRatePct: 15,
     })
     data.forEach(equityPlusAppreciationEqualsNetWorth)
   })
@@ -573,5 +600,119 @@ describe('runSimulation — Buying as landlord, Investing matches only equity ca
     const withRent = runSimulation({ ...base, propertyStatus: 'OFFPLAN', monthlyRent: 5000 })
     const noRent = runSimulation({ ...base, propertyStatus: 'OFFPLAN', monthlyRent: 0 })
     expect(withRent.data[0]).toEqual(noRent.data[0])
+  })
+})
+
+describe('runSimulation — rental income tax and Capital Gains Tax Rate (personal marginal rates, not stockDragPct)', () => {
+  it('a US landlord pays Federal + State combined on positive rental cash flow', () => {
+    const monthlyRent = 6000
+    const marginalTaxRateFed = 37
+    const marginalTaxRateState = 13.3
+    const { data, mortgagePayment } = runSimulation({
+      ...base,
+      downPaymentPct: 20,
+      mortgageRate: 5,
+      monthlyRent,
+      citizenship: 'USA',
+      taxResidence: 'UAE',
+      marginalTaxRateFed,
+      marginalTaxRateState,
+    })
+    const landlordCashFlow = monthlyRent - mortgagePayment
+    const combinedRate = (marginalTaxRateFed + marginalTaxRateState) / 100
+    const expectedAfterTaxMonthly = landlordCashFlow - landlordCashFlow * combinedRate
+    expect(data[0].buyerLandlordSurplus).toBeCloseTo(expectedAfterTaxMonthly * 12, 0) // 0% stock return, so a simple sum
+  })
+
+  it('a UK landlord pays only the single marginal rate, ignoring the unused Fed/State fields', () => {
+    const monthlyRent = 6000
+    const marginalTaxRateSingle = 45
+    const { data, mortgagePayment } = runSimulation({
+      ...base,
+      downPaymentPct: 20,
+      mortgageRate: 5,
+      monthlyRent,
+      citizenship: 'UK',
+      taxResidence: 'UK',
+      marginalTaxRateSingle,
+      marginalTaxRateFed: 999, // must be ignored — UK doesn't use Fed/State
+      marginalTaxRateState: 999,
+    })
+    const landlordCashFlow = monthlyRent - mortgagePayment
+    const expectedAfterTaxMonthly = landlordCashFlow - landlordCashFlow * (marginalTaxRateSingle / 100)
+    expect(data[0].buyerLandlordSurplus).toBeCloseTo(expectedAfterTaxMonthly * 12, 0)
+  })
+
+  it('a rental loss (negative cash flow) is not taxed — no refund on the way down', () => {
+    // A large mortgage payment relative to rent produces a monthly loss; taxing
+    // it would mean a NEGATIVE tax (a refund), which real rental-loss rules
+    // don't hand out for free — this app simply doesn't tax losses at all.
+    const { data } = runSimulation({
+      ...base,
+      downPaymentPct: 5,
+      mortgageRate: 5,
+      monthlyRent: 100,
+      citizenship: 'USA',
+      taxResidence: 'UAE',
+      marginalTaxRateFed: 37,
+      marginalTaxRateState: 13.3,
+    })
+    const withTax = data[0].buyerLandlordSurplus
+    const { data: noTaxData } = runSimulation({
+      ...base,
+      downPaymentPct: 5,
+      mortgageRate: 5,
+      monthlyRent: 100,
+      citizenship: 'USA',
+      taxResidence: 'UAE',
+      marginalTaxRateFed: 0,
+      marginalTaxRateState: 0,
+    })
+    expect(withTax).toBe(noTaxData[0].buyerLandlordSurplus) // untaxed either way — it's a loss
+  })
+
+  it('the UAE/tax-free profile ignores the marginal rate inputs entirely — always untaxed', () => {
+    const withRates = runSimulation({
+      ...base,
+      downPaymentPct: 20,
+      mortgageRate: 5,
+      monthlyRent: 6000,
+      marginalTaxRateFed: 37,
+      marginalTaxRateState: 13.3,
+      marginalTaxRateSingle: 45,
+    })
+    const withoutRates = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5, monthlyRent: 6000 })
+    expect(withRates.data[0]).toEqual(withoutRates.data[0])
+  })
+
+  it('Capital Gains Tax Rate is a free-standing input — applies on a Hold exit regardless of citizenship', () => {
+    const { data } = runSimulation({
+      ...base,
+      postHandoverAppreciation: 10,
+      capitalGainsTaxRatePct: 25, // an arbitrary rate, not tied to any built-in citizenship figure
+    })
+    const profit = 1000000 * 1.1 ** 3 - 1000000
+    const expectedTax = profit * 0.25
+    expect(data[2].buyerNetWorth).toBeCloseTo(1000000 * 1.1 ** 3 - expectedTax, 0)
+  })
+
+  it("a Personal Primary Residence ignores the Capital Gains Tax Rate input entirely — it's not used on that path", () => {
+    const primaryResidence = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'India',
+      taxResidence: 'India',
+      isPrimaryResidence: true,
+      capitalGainsTaxRatePct: 99, // absurdly high — should have zero effect on this path
+    })
+    const expectedNoTax = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'India',
+      taxResidence: 'India',
+      isPrimaryResidence: true,
+      capitalGainsTaxRatePct: 0,
+    })
+    expect(primaryResidence.data[2].buyerNetWorth).toBe(expectedNoTax.data[2].buyerNetWorth)
   })
 })
