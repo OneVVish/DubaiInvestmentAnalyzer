@@ -192,6 +192,98 @@ export function runSimulation(inputs) {
   let landlordSurplus = 0
 
   const data = []
+  // Monthly-granularity mirror of `data`, populated only for a Flip — its
+  // whole story fits inside the 36-month construction window, where a
+  // yearly snapshot (3 points) is too coarse to see the month-by-month
+  // build-up of installments and appreciation. Hold/Ready stay purely
+  // annual; this array stays empty for them.
+  const flipMonthlyData = []
+
+  // - costBasisEquity: principal actually paid in so far (mortgage
+  //   paydown, or developer milestones), at the ORIGINAL price — not
+  //   touched by price growth, selling costs, or exit tax.
+  // - appreciationGainNet: the price-growth portion, net of exit tax and
+  //   selling costs (those are charged against the gain, not the
+  //   principal — matches how the exit tax itself is already computed,
+  //   on profit alone). Proportional to costBasisEquity while off-plan
+  //   construction is still in progress (you only own a fraction of the
+  //   gain until you've paid that same fraction of the price).
+  // - cashPortion: capital not tied up in the property — the off-plan
+  //   float (pre-handover, or Danube's post-handover residual). Tracked
+  //   for the breakdown chart but deliberately excluded from
+  //   buyerNetWorth below — it's idle capital, not realized property
+  //   value, until either the property is fully owned (folds into
+  //   appreciation/equity naturally) or the deal is flipped (see below).
+  // - landlordSurplusSnapshot: the accumulated rental profit tracked
+  //   above — 0 during off-plan construction and for a flip (never
+  //   rentable), otherwise INCLUDED in buyerNetWorth, since it's
+  //   already-realized rental cash, not idle uncommitted capital.
+  //
+  // Reused by both the yearly `data` snapshot and the flip-only monthly
+  // one below — same computation, different capture schedule.
+  function buildSnapshot(month) {
+    let buyerNetWorth
+    let costBasisEquity
+    let appreciationGainNet
+    let cashPortion
+    let landlordSurplusSnapshot = 0
+
+    if (flipExecuted && month === HANDOVER_MONTH) {
+      // The flip month itself: show where the payout actually came from
+      // (equity paid in vs. appreciation gain) rather than dumping it
+      // all into an opaque "cash" bucket — the whole point of a flip is
+      // converting property gains into cash, not that those gains never
+      // existed.
+      buyerNetWorth = flipPortfolio
+      costBasisEquity = flipEquityAtFlip
+      appreciationGainNet = flipAppreciationAtFlip
+      cashPortion = 0
+    } else if (flipExecuted) {
+      // Any period after the flip: now it's just a generic reinvested
+      // stock portfolio, fully disconnected from real estate — no equity
+      // or appreciation left to attribute.
+      buyerNetWorth = flipPortfolio
+      costBasisEquity = 0
+      appreciationGainNet = 0
+      cashPortion = flipPortfolio
+    } else if (isOffPlan && !handoverDone) {
+      // Full gain, not scaled by how much has been paid to the developer
+      // so far — signing the SPA locks in the original price, so the
+      // contract's worth if exited today is the property's current
+      // market value minus whatever's still owed, same shape as the
+      // Flip and post-handover branches (`cashRealized = v36 -
+      // remainingObligation` = paidToDeveloperSoFar + fullAppreciationGain).
+      // A leveraged figure by design: the less paid in so far, the more
+      // the full gain amplifies the return on actual cash committed.
+      const appreciationGain = homeValue - propertyPrice
+      costBasisEquity = paidToDeveloper
+      appreciationGainNet = appreciationGain
+      cashPortion = buyerPool
+      buyerNetWorth = costBasisEquity + appreciationGainNet
+    } else {
+      // Ready, or off-plan post-handover — both are now a straightforward
+      // owned home: value if sold this year, net of selling costs, any
+      // remaining developer/mortgage balance, and the exit tax.
+      const remainingBalance = isOffPlan ? Math.max(0, propertyPrice - paidToDeveloper) : loanBalance
+      const appreciationGain = homeValue - propertyPrice
+      const exitTax = computeHoldExitTax(appreciationGain, taxProfile, isPrimaryResidence, capitalGainsTaxRatePct)
+      costBasisEquity = propertyPrice - remainingBalance
+      appreciationGainNet = appreciationGain - exitTax - homeValue * (sellingCostPct / 100)
+      cashPortion = isOffPlan ? buyerPool : 0
+      landlordSurplusSnapshot = landlordSurplus
+      buyerNetWorth = costBasisEquity + appreciationGainNet + landlordSurplusSnapshot
+    }
+
+    return {
+      buyerNetWorth: Math.round(buyerNetWorth),
+      renterNetWorth: Math.round(renterPortfolio),
+      homeValue: Math.round(homeValue),
+      buyerCostBasisEquity: Math.round(costBasisEquity),
+      buyerAppreciationGain: Math.round(appreciationGainNet),
+      buyerCashPortion: Math.round(cashPortion),
+      buyerLandlordSurplus: Math.round(landlordSurplusSnapshot),
+    }
+  }
 
   for (let month = 1; month <= MONTHS; month++) {
     // Home appreciation starts compounding from month 1 (year 1 already
@@ -330,88 +422,13 @@ export function runSimulation(inputs) {
     renterPortfolio += investingContribution
 
     if (month % 12 === 0) {
-      const year = month / 12
-      let buyerNetWorth
-      // - costBasisEquity: principal actually paid in so far (mortgage
-      //   paydown, or developer milestones), at the ORIGINAL price — not
-      //   touched by price growth, selling costs, or exit tax.
-      // - appreciationGainNet: the price-growth portion, net of exit tax and
-      //   selling costs (those are charged against the gain, not the
-      //   principal — matches how the exit tax itself is already computed,
-      //   on profit alone). Proportional to costBasisEquity while off-plan
-      //   construction is still in progress (you only own a fraction of the
-      //   gain until you've paid that same fraction of the price).
-      // - cashPortion: capital not tied up in the property — the off-plan
-      //   float (pre-handover, or Danube's post-handover residual). Tracked
-      //   for the breakdown chart but deliberately excluded from
-      //   buyerNetWorth below — it's idle capital, not realized property
-      //   value, until either the property is fully owned (folds into
-      //   appreciation/equity naturally) or the deal is flipped (see below).
-      // - landlordSurplusSnapshot: the accumulated rental profit tracked
-      //   above — 0 during off-plan construction and for a flip (never
-      //   rentable), otherwise INCLUDED in buyerNetWorth, since it's
-      //   already-realized rental cash, not idle uncommitted capital.
-      let costBasisEquity
-      let appreciationGainNet
-      let cashPortion
-      let landlordSurplusSnapshot = 0
-
-      if (flipExecuted && month === HANDOVER_MONTH) {
-        // The flip year itself: show where the payout actually came from
-        // (equity paid in vs. appreciation gain) rather than dumping it
-        // all into an opaque "cash" bucket — the whole point of a flip is
-        // converting property gains into cash, not that those gains never
-        // existed.
-        buyerNetWorth = flipPortfolio
-        costBasisEquity = flipEquityAtFlip
-        appreciationGainNet = flipAppreciationAtFlip
-        cashPortion = 0
-      } else if (flipExecuted) {
-        // Any year after the flip: now it's just a generic reinvested
-        // stock portfolio, fully disconnected from real estate — no equity
-        // or appreciation left to attribute.
-        buyerNetWorth = flipPortfolio
-        costBasisEquity = 0
-        appreciationGainNet = 0
-        cashPortion = flipPortfolio
-      } else if (isOffPlan && !handoverDone) {
-        // Full gain, not scaled by how much has been paid to the developer
-        // so far — signing the SPA locks in the original price, so the
-        // contract's worth if exited today is the property's current
-        // market value minus whatever's still owed, same shape as the
-        // Flip and post-handover branches (`cashRealized = v36 -
-        // remainingObligation` = paidToDeveloperSoFar + fullAppreciationGain).
-        // A leveraged figure by design: the less paid in so far, the more
-        // the full gain amplifies the return on actual cash committed.
-        const appreciationGain = homeValue - propertyPrice
-        costBasisEquity = paidToDeveloper
-        appreciationGainNet = appreciationGain
-        cashPortion = buyerPool
-        buyerNetWorth = costBasisEquity + appreciationGainNet
-      } else {
-        // Ready, or off-plan post-handover — both are now a straightforward
-        // owned home: value if sold this year, net of selling costs, any
-        // remaining developer/mortgage balance, and the exit tax.
-        const remainingBalance = isOffPlan ? Math.max(0, propertyPrice - paidToDeveloper) : loanBalance
-        const appreciationGain = homeValue - propertyPrice
-        const exitTax = computeHoldExitTax(appreciationGain, taxProfile, isPrimaryResidence, capitalGainsTaxRatePct)
-        costBasisEquity = propertyPrice - remainingBalance
-        appreciationGainNet = appreciationGain - exitTax - homeValue * (sellingCostPct / 100)
-        cashPortion = isOffPlan ? buyerPool : 0
-        landlordSurplusSnapshot = landlordSurplus
-        buyerNetWorth = costBasisEquity + appreciationGainNet + landlordSurplusSnapshot
-      }
-
-      data.push({
-        year,
-        buyerNetWorth: Math.round(buyerNetWorth),
-        renterNetWorth: Math.round(renterPortfolio),
-        homeValue: Math.round(homeValue),
-        buyerCostBasisEquity: Math.round(costBasisEquity),
-        buyerAppreciationGain: Math.round(appreciationGainNet),
-        buyerCashPortion: Math.round(cashPortion),
-        buyerLandlordSurplus: Math.round(landlordSurplusSnapshot),
-      })
+      data.push({ year: month / 12, ...buildSnapshot(month) })
+    }
+    // Flip's whole story fits inside the 36-month construction window — a
+    // yearly snapshot alone can't show the month-by-month build-up, so
+    // capture every month through the flip itself, separately from `data`.
+    if (isFlip && month <= HANDOVER_MONTH) {
+      flipMonthlyData.push({ month, ...buildSnapshot(month) })
     }
   }
 
@@ -419,6 +436,7 @@ export function runSimulation(inputs) {
 
   return {
     data,
+    flipMonthlyData,
     mortgagePayment,
     downPayment,
     breakEvenYear: breakEvenPoint ? breakEvenPoint.year : null,

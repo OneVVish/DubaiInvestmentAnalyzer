@@ -266,7 +266,7 @@ export default function App() {
   const handleTaxResidenceChange = (taxResidence) =>
     setInputs((prev) => applyTaxProfileDefaults(prev, prev.citizenship, taxResidence))
 
-  const { data, mortgagePayment, downPayment, breakEvenYear, flipCAGR } = useMemo(
+  const { data, flipMonthlyData, mortgagePayment, downPayment, breakEvenYear, flipCAGR } = useMemo(
     () => runSimulation(inputs),
     [inputs],
   )
@@ -294,12 +294,14 @@ export default function App() {
   // A flipped contract's story is over at handover — the buyer no longer
   // tracks home equity or rent past that point (see simulation.js), so the
   // remaining ~27 years are just generic compounding, not property-specific.
-  // Truncate everything shown to the user at the flip point instead of
-  // implying 30 years of real estate insight that isn't there.
-  const chartData = isFlip ? data.slice(0, flipYear) : data
+  // Show the flip's own monthly-granularity data instead of the yearly
+  // series — its whole story fits inside 36 months, too coarse to see
+  // month-by-month at yearly resolution — instead of implying 30 years of
+  // real estate insight that isn't there.
+  const chartData = isFlip ? flipMonthlyData : data
   const finalYear = chartData[chartData.length - 1]
-  const displayBreakEvenYear = isFlip
-    ? chartData.find((d) => d.buyerNetWorth > d.renterNetWorth)?.year ?? null
+  const displayBreakEven = isFlip
+    ? chartData.find((d) => d.buyerNetWorth > d.renterNetWorth)?.month ?? null
     : breakEvenYear
 
   const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
@@ -785,15 +787,19 @@ export default function App() {
             <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-900/40 p-6 shadow-lg shadow-black/20">
               <p className="text-xs uppercase tracking-wider text-slate-400">Break-Even Point</p>
               <p className="text-2xl font-bold text-white">
-                {displayBreakEvenYear ? `Year ${displayBreakEvenYear}` : 'Alternate Investment Wins'}
+                {displayBreakEven
+                  ? isFlip
+                    ? `Month ${displayBreakEven}`
+                    : `Year ${displayBreakEven}`
+                  : 'Alternate Investment Wins'}
               </p>
               <p className="mt-1 max-w-xl text-sm text-slate-400">
                 {isFlip
-                  ? displayBreakEvenYear
-                    ? `Dubai Property overtakes the Alternate Investment by the flip, in year ${displayBreakEvenYear}.`
-                    : `The Alternate Investment still beats Dubai Property at the flip (year ${flipYear}).`
-                  : displayBreakEvenYear
-                    ? `Dubai Property overtakes the Alternate Investment in year ${displayBreakEvenYear}.`
+                  ? displayBreakEven
+                    ? `Dubai Property overtakes the Alternate Investment by the flip, in month ${displayBreakEven}.`
+                    : `The Alternate Investment still beats Dubai Property at the flip (month ${HANDOVER_MONTH}).`
+                  : displayBreakEven
+                    ? `Dubai Property overtakes the Alternate Investment in year ${displayBreakEven}.`
                     : 'Over 30 years, the Alternate Investment beats Dubai Property in this scenario.'}
               </p>
 
@@ -815,13 +821,13 @@ export default function App() {
                   }
                 />
                 <StatCard
-                  label={isFlip ? `Dubai Property Net Worth (at Flip, Yr ${flipYear})` : 'Dubai Property Net Worth (Yr 30)'}
+                  label={isFlip ? `Dubai Property Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Dubai Property Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
                   accentClass={buyerWinsAt30 ? 'text-amber-400' : 'text-slate-300'}
                   tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax (full investment-property rate by default, unless Personal Primary Residence is on below) — plus accumulated rental surplus (rent collected, net of vacancy, minus the mortgage/installment and carrying costs, reinvested). Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
                 />
                 <StatCard
-                  label={isFlip ? `Alternate Investment Net Worth (at Flip, Yr ${flipYear})` : 'Alternate Investment Net Worth (Yr 30)'}
+                  label={isFlip ? `Alternate Investment Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Alternate Investment Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
                   accentClass={!buyerWinsAt30 ? 'text-rose-400' : 'text-slate-300'}
                   tooltip="Starting capital equal to Dubai Property's own month-0 cash outlay, plus every month's mortgage payment (or off-plan developer installment) that would have gone into building home equity — invested here instead, compounding at your Global Tax Profile's net stock return. Rent isn't part of this comparison; it's Dubai Property's own rental income (Invested Rental Surplus)."
@@ -839,17 +845,22 @@ export default function App() {
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
               <h3 className="mb-4 text-sm font-semibold text-slate-300">
-                {isFlip ? `Net Worth Projection Through the Flip (Year ${flipYear})` : '30-Year Net Worth Projection'}
+                {isFlip ? `Net Worth Projection Through the Flip (Month ${HANDOVER_MONTH})` : '30-Year Net Worth Projection'}
               </h3>
               <div className="h-[420px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis
-                      dataKey="year"
+                      dataKey={isFlip ? 'month' : 'year'}
                       stroke="#64748b"
                       tick={{ fill: '#94a3b8', fontSize: 12 }}
-                      label={{ value: 'Years', position: 'insideBottom', offset: -3, fill: '#64748b' }}
+                      label={{
+                        value: isFlip ? 'Months' : 'Years',
+                        position: 'insideBottom',
+                        offset: -3,
+                        fill: '#64748b',
+                      }}
                     />
                     <YAxis
                       stroke="#64748b"
@@ -859,7 +870,7 @@ export default function App() {
                     />
                     <Tooltip
                       formatter={tooltipFormatter(fmt)}
-                      labelFormatter={(year) => `Year ${year}`}
+                      labelFormatter={(value) => (isFlip ? `Month ${value}` : `Year ${value}`)}
                       contentStyle={{
                         backgroundColor: '#0f172a',
                         border: '1px solid #334155',
@@ -868,9 +879,9 @@ export default function App() {
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10 }} />
-                    {displayBreakEvenYear && (
+                    {displayBreakEven && (
                       <ReferenceLine
-                        x={displayBreakEvenYear}
+                        x={displayBreakEven}
                         stroke="#f59e0b"
                         strokeDasharray="4 4"
                         label={{ value: 'Break-even', fill: '#f59e0b', fontSize: 11, position: 'top' }}
@@ -899,7 +910,7 @@ export default function App() {
               </div>
               <p className="mt-4 text-xs text-slate-500">
                 {isFlip &&
-                  `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
+                  `Chart and figures above stop at the flip (month ${HANDOVER_MONTH}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
                 Tax calculations are simplified estimates based on standard 2026 tax rules — Hold
                 exits default to investment-property rates unless marked a Personal Primary
                 Residence (Global Tax Profile). Off-plan milestones, appreciation, and rental
@@ -929,10 +940,15 @@ export default function App() {
                   <BarChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                     <XAxis
-                      dataKey="year"
+                      dataKey={isFlip ? 'month' : 'year'}
                       stroke="#64748b"
                       tick={{ fill: '#94a3b8', fontSize: 12 }}
-                      label={{ value: 'Years', position: 'insideBottom', offset: -3, fill: '#64748b' }}
+                      label={{
+                        value: isFlip ? 'Months' : 'Years',
+                        position: 'insideBottom',
+                        offset: -3,
+                        fill: '#64748b',
+                      }}
                     />
                     <YAxis
                       stroke="#64748b"
@@ -942,7 +958,7 @@ export default function App() {
                     />
                     <Tooltip
                       formatter={tooltipFormatter(fmt)}
-                      labelFormatter={(year) => `Year ${year}`}
+                      labelFormatter={(value) => (isFlip ? `Month ${value}` : `Year ${value}`)}
                       contentStyle={{
                         backgroundColor: '#0f172a',
                         border: '1px solid #334155',
@@ -971,7 +987,7 @@ export default function App() {
         data={chartData}
         mortgagePayment={mortgagePayment}
         downPayment={downPayment}
-        breakEvenYear={displayBreakEvenYear}
+        breakEven={displayBreakEven}
         finalYear={finalYear}
         displayCurrency={displayCurrency}
         effectivePreHandoverAppreciation={effectivePreHandoverAppreciation}

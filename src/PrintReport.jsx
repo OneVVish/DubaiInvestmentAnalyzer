@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts'
 import { formatCurrency } from './format.js'
-import { PAYMENT_PLANS } from './paymentPlans.js'
+import { HANDOVER_MONTH, PAYMENT_PLANS } from './paymentPlans.js'
 import { COMMUNITIES } from './communities.js'
 import { computeAnnualServiceCharges } from './serviceCharges.js'
 import { resolveTaxProfile } from './taxEngine.js'
@@ -33,7 +33,7 @@ export default function PrintReport({
   data,
   mortgagePayment,
   downPayment,
-  breakEvenYear,
+  breakEven,
   finalYear,
   displayCurrency,
   effectivePreHandoverAppreciation,
@@ -64,11 +64,11 @@ export default function PrintReport({
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Bottom Line</h2>
         <p className="mb-3 text-base">
           {isFlip
-            ? breakEvenYear
-              ? `Dubai Property overtakes the Alternate Investment by the flip, in year ${breakEvenYear}.`
-              : `The Alternate Investment still beats Dubai Property at the flip (year ${flipYear}).`
-            : breakEvenYear
-              ? `Dubai Property overtakes the Alternate Investment in year ${breakEvenYear}.`
+            ? breakEven
+              ? `Dubai Property overtakes the Alternate Investment by the flip, in month ${breakEven}.`
+              : `The Alternate Investment still beats Dubai Property at the flip (month ${HANDOVER_MONTH}).`
+            : breakEven
+              ? `Dubai Property overtakes the Alternate Investment in year ${breakEven}.`
               : 'Over 30 years, the Alternate Investment beats Dubai Property in this scenario.'}
         </p>
         <div className={`grid gap-4 ${isFlip ? 'grid-cols-4' : 'grid-cols-3'}`}>
@@ -82,7 +82,7 @@ export default function PrintReport({
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
-              {isFlip ? `Dubai Property Net Worth (at Flip, Yr ${flipYear})` : 'Dubai Property Net Worth (Yr 30)'}
+              {isFlip ? `Dubai Property Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Dubai Property Net Worth (Yr 30)'}
             </p>
             <p className={`text-lg font-bold ${buyerWinsAt30 ? 'text-amber-600' : ''}`}>
               {finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
@@ -90,7 +90,7 @@ export default function PrintReport({
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
-              {isFlip ? `Alternate Investment Net Worth (at Flip, Yr ${flipYear})` : 'Alternate Investment Net Worth (Yr 30)'}
+              {isFlip ? `Alternate Investment Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Alternate Investment Net Worth (Yr 30)'}
             </p>
             <p className={`text-lg font-bold ${!buyerWinsAt30 ? 'text-sky-600' : ''}`}>
               {finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
@@ -109,13 +109,13 @@ export default function PrintReport({
 
       <section className="mb-6" style={{ breakInside: 'avoid' }}>
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
-          {isFlip ? `Net Worth Projection Through the Flip (Year ${flipYear})` : '30-Year Net Worth Projection'}
+          {isFlip ? `Net Worth Projection Through the Flip (Month ${HANDOVER_MONTH})` : '30-Year Net Worth Projection'}
         </h2>
         <div className="h-[280px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="year" stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
+              <XAxis dataKey={isFlip ? 'month' : 'year'} stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
               <YAxis
                 stroke="#475569"
                 tick={{ fill: '#475569', fontSize: 11 }}
@@ -123,9 +123,7 @@ export default function PrintReport({
                 width={65}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              {breakEvenYear && (
-                <ReferenceLine x={breakEvenYear} stroke="#f59e0b" strokeDasharray="4 4" />
-              )}
+              {breakEven && <ReferenceLine x={breakEven} stroke="#f59e0b" strokeDasharray="4 4" />}
               <Line
                 type="monotone"
                 dataKey="buyerNetWorth"
@@ -169,7 +167,7 @@ export default function PrintReport({
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="year" stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
+              <XAxis dataKey={isFlip ? 'month' : 'year'} stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
               <YAxis
                 stroke="#475569"
                 tick={{ fill: '#475569', fontSize: 11 }}
@@ -323,7 +321,7 @@ export default function PrintReport({
 
       <footer className="border-t border-slate-200 pt-3 text-xs text-slate-400">
         {isFlip &&
-          `Chart and figures above stop at the flip (year ${flipYear}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
+          `Chart and figures above stop at the flip (month ${HANDOVER_MONTH}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
         Tax calculations are simplified estimates based on standard 2026 tax rules — Hold exits
         default to investment-property rates unless marked a Personal Primary Residence (Global
         Tax Profile). Off-plan milestones, appreciation, and rental income are estimates; the

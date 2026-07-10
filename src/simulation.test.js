@@ -419,6 +419,55 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
   })
 })
 
+describe('runSimulation — flipMonthlyData (month-by-month timeline for a Flip)', () => {
+  it('is empty for a Ready property and for an Off-Plan Hold', () => {
+    expect(runSimulation(base).flipMonthlyData).toEqual([])
+    expect(
+      runSimulation({ ...base, propertyStatus: 'OFFPLAN', exitStrategy: 'HOLD' }).flipMonthlyData,
+    ).toEqual([])
+  })
+
+  it('has exactly 36 monthly entries for a Flip, running from month 1 to month 36', () => {
+    const { flipMonthlyData } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    expect(flipMonthlyData).toHaveLength(36)
+    expect(flipMonthlyData[0].month).toBe(1)
+    expect(flipMonthlyData[35].month).toBe(36)
+  })
+
+  it("the final month's buyerNetWorth matches the same flip payout the yearly data reports", () => {
+    const { data, flipMonthlyData } = runSimulation({
+      ...base,
+      preHandoverAppreciation: 10,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    expect(flipMonthlyData[35].buyerNetWorth).toBe(data[2].buyerNetWorth)
+  })
+
+  it('cost-basis equity is non-decreasing month over month before the flip — real monthly granularity, not repeated yearly values', () => {
+    const { flipMonthlyData } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    for (let i = 1; i < flipMonthlyData.length; i++) {
+      expect(flipMonthlyData[i].buyerCostBasisEquity).toBeGreaterThanOrEqual(
+        flipMonthlyData[i - 1].buyerCostBasisEquity,
+      )
+    }
+    // Distinct values across the window confirm it isn't just the same 3 yearly figures repeated.
+    const distinctValues = new Set(flipMonthlyData.map((d) => d.buyerCostBasisEquity))
+    expect(distinctValues.size).toBeGreaterThan(3)
+  })
+})
+
 describe('runSimulation — equity vs appreciation breakdown', () => {
   // Buyer Net Worth is Cost-Basis Equity + Appreciation Gain + Landlord
   // Surplus (accumulated rental profit — 0 whenever `base`'s monthlyRent:
