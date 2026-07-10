@@ -15,8 +15,8 @@ import {
 import { Check, Download, Info, Printer, RotateCcw, Save, Share2 } from 'lucide-react'
 import {
   ASSET_CLASS_APPRECIATION_DEFAULTS,
+  ASSET_CLASS_POSTHANDOVER_APPRECIATION_DEFAULTS,
   ASSET_CLASS_SIZE_DEFAULTS,
-  POST_HANDOVER_APPRECIATION_DEFAULT,
   AIRPORT_BONUS_PCT,
   METRO_BONUS_PCT,
   getEffectivePreHandoverAppreciation,
@@ -174,7 +174,7 @@ const DEFAULT_INPUTS = {
   nearMetro: false,
   nearAirport: false,
   preHandoverAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[DEFAULT_ASSET_CLASS],
-  postHandoverAppreciation: POST_HANDOVER_APPRECIATION_DEFAULT,
+  postHandoverAppreciation: ASSET_CLASS_POSTHANDOVER_APPRECIATION_DEFAULTS[DEFAULT_ASSET_CLASS],
   propertyStatus: 'READY',
   developerPlan: 'EMAAR',
   exitStrategy: 'HOLD',
@@ -193,6 +193,7 @@ const DEFAULT_INPUTS = {
   stockReturn: 7,
   citizenship: 'UAE/Other',
   taxResidence: 'UAE',
+  isPrimaryResidence: false,
 }
 
 const CITIZENSHIP_LABELS = { USA: 'USA', UK: 'UK', Canada: 'Canada', India: 'India', 'UAE/Other': 'UAE / Other' }
@@ -218,6 +219,7 @@ export default function App() {
         ...prev,
         assetClass,
         preHandoverAppreciation: ASSET_CLASS_APPRECIATION_DEFAULTS[assetClass],
+        postHandoverAppreciation: ASSET_CLASS_POSTHANDOVER_APPRECIATION_DEFAULTS[assetClass],
         propertySizeSqft: newSize,
         ...(yieldPct != null ? { rentalYield: yieldPct } : {}),
         ...(pricePerSqft != null ? { propertyPrice: newSize * pricePerSqft } : {}),
@@ -250,10 +252,11 @@ export default function App() {
 
   // Off-plan has no mortgage, but it does have a real recurring monthly
   // obligation — the regular construction-period installment (excludes the
-  // 20% booking fee and any handover-time lump sum). Danube's continues
-  // through month 80; shown here as a representative "during construction"
-  // figure. Recomputed here purely for display — simulation.js builds its
-  // own copy of this schedule internally.
+  // plan-specific booking fee and any handover-time lump/post-handover
+  // spread). Danube's continues well past handover; shown here as a
+  // representative "during construction" figure. Recomputed here purely
+  // for display — simulation.js builds its own copy of this schedule
+  // internally.
   const offPlanMonthlyInstallment = useMemo(() => {
     if (!isOffPlan) return null
     const schedule = buildMilestoneSchedule(inputs.developerPlan, inputs.propertyPrice)
@@ -687,6 +690,12 @@ export default function App() {
                 options={RESIDENCE_OPTIONS.map((r) => ({ value: r, label: RESIDENCE_LABELS[r] }))}
                 description="US citizenship carries US tax exposure regardless of residence."
               />
+              <Toggle
+                label="Personal Primary Residence"
+                description="I will live here, not rent it out — unlocks primary-residence tax relief (US $250K exemption, UK/Canada 0% CGT). Off by default, since Buying models a rental throughout; when off, a Hold exit is taxed at the same rate as a Flip."
+                checked={inputs.isPrimaryResidence}
+                onChange={setField('isPrimaryResidence')}
+              />
             </SectionCard>
           </div>
 
@@ -720,7 +729,7 @@ export default function App() {
                   accentClass="text-white"
                   tooltip={
                     isOffPlan
-                      ? `Regular monthly developer milestone payment (excludes the 20% booking fee and any handover-time lump sum). ${PAYMENT_PLANS[inputs.developerPlan]?.label ?? ''} — Danube's continues through month 80, alongside rental income tracked separately as Invested Rental Surplus.`
+                      ? `Regular monthly developer milestone payment (excludes the ${PAYMENT_PLANS[inputs.developerPlan]?.bookingPct ?? ''}% booking fee and any handover-time lump/post-handover spread). ${PAYMENT_PLANS[inputs.developerPlan]?.label ?? ''} — Danube's continues well past handover, alongside rental income tracked separately as Invested Rental Surplus.`
                       : undefined
                   }
                 />
@@ -728,7 +737,7 @@ export default function App() {
                   label={isFlip ? `Buyer Net Worth (at Flip, Yr ${flipYear})` : 'Buyer Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
                   accentClass={buyerWinsAt30 ? 'text-amber-400' : 'text-slate-300'}
-                  tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax — plus accumulated rental surplus (rent collected, net of vacancy, minus the mortgage/installment and carrying costs, reinvested). Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
+                  tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax (full investment-property rate by default, unless Personal Primary Residence is on below) — plus accumulated rental surplus (rent collected, net of vacancy, minus the mortgage/installment and carrying costs, reinvested). Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
                 />
                 <StatCard
                   label={isFlip ? `Renter Net Worth (at Flip, Yr ${flipYear})` : 'Renter Net Worth (Yr 30)'}

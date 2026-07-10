@@ -31,6 +31,7 @@ const base = {
   stockReturn: 0,
   citizenship: 'UAE/Other',
   taxResidence: 'UAE',
+  isPrimaryResidence: false,
 }
 
 describe('calculateMortgagePayment', () => {
@@ -70,8 +71,14 @@ describe('runSimulation — Ready property', () => {
     expect(data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT) // full gain, no tax
   })
 
-  it('a US citizen owes exit tax only on profit beyond the $250K USD exemption', () => {
-    const { data } = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'USA', taxResidence: 'UAE' })
+  it('a US citizen owes exit tax only on profit beyond the $250K USD exemption — but only if marked a Personal Primary Residence', () => {
+    const { data } = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'USA',
+      taxResidence: 'UAE',
+      isPrimaryResidence: true,
+    })
     const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const taxableUSD = Math.max(0, profitAED / AED_PER_USD - 250000)
     const expectedTax = taxableUSD * AED_PER_USD * 0.15
@@ -79,18 +86,48 @@ describe('runSimulation — Ready property', () => {
     expect(expectedTax).toBeGreaterThan(0) // sanity: this scenario actually exceeds the exemption
   })
 
-  it('UK and Canada residents owe zero exit tax even on a large gain (primary-residence relief)', () => {
-    const uk = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'UK', taxResidence: 'UK' })
-    const canada = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'UAE/Other', taxResidence: 'Canada' })
+  it('UK and Canada residents owe zero exit tax even on a large gain, when marked a Personal Primary Residence', () => {
+    const uk = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'UK',
+      taxResidence: 'UK',
+      isPrimaryResidence: true,
+    })
+    const canada = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'UAE/Other',
+      taxResidence: 'Canada',
+      isPrimaryResidence: true,
+    })
     expect(uk.data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT)
     expect(canada.data[2].buyerNetWorth).toBe(YEAR3_HOME_VALUE_AT_50PCT)
   })
 
-  it('India owes exit tax on the full profit, with no exemption', () => {
+  it('India owes exit tax on the full profit, with no exemption, regardless of the Personal Primary Residence toggle', () => {
     const { data } = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'India', taxResidence: 'India' })
     const profitAED = YEAR3_HOME_VALUE_AT_50PCT - 1000000
     const expectedTax = profitAED * 0.125
     expect(data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - expectedTax, 0)
+  })
+
+  it('by default (not a Personal Primary Residence), a Hold exit is taxed at the same rate as a Flip — no primary-residence relief', () => {
+    // Buying now models a landlord throughout, so the default (isPrimaryResidence:
+    // false, inherited from `base`) forfeits primary-residence relief for US/UK/
+    // Canada — same rate as an off-plan Flip, no exemption.
+    const us = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'USA', taxResidence: 'UAE' })
+    const uk = runSimulation({ ...base, postHandoverAppreciation: 50, citizenship: 'UK', taxResidence: 'UK' })
+    const canada = runSimulation({
+      ...base,
+      postHandoverAppreciation: 50,
+      citizenship: 'UAE/Other',
+      taxResidence: 'Canada',
+    })
+    const profit = YEAR3_HOME_VALUE_AT_50PCT - 1000000
+    expect(us.data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - profit * 0.15, 0)
+    expect(uk.data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - profit * 0.2, 0)
+    expect(canada.data[2].buyerNetWorth).toBeCloseTo(YEAR3_HOME_VALUE_AT_50PCT - profit * 0.15, 0)
   })
 })
 
@@ -101,24 +138,31 @@ describe('runSimulation — Off-plan, Hold', () => {
     expect(data[2].renterNetWorth).toBe(1000000)
   })
 
-  it('Damac: fully paid off and worth exactly the property price at handover (year 3)', () => {
+  it('Damac: only 60% paid at handover (year 3) — the 40% back-end now spreads over the 24 months after', () => {
     const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DAMAC' })
-    expect(data[2].buyerNetWorth).toBe(1000000)
+    expect(data[2].buyerNetWorth).toBe(600000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(400000, 0) // still tracked, just not counted
   })
 
-  it('Danube: still owes 44% at handover, so net worth is only the 56% actually paid in (cash/uncommitted excluded)', () => {
-    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
-    expect(data[2].buyerNetWorth).toBe(560000)
-    expect(data[2].buyerCashPortion).toBeCloseTo(440000, 0) // still tracked, just not counted
+  it('Damac: fully paid off by month 60 (year 5), once its post-handover installments finish', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DAMAC' })
+    expect(data[4].buyerNetWorth).toBe(1000000) // year 5 = month 60
+    expect(data[4].buyerCashPortion).toBeCloseTo(0, 0)
   })
 
-  it('Danube: fully paid off by month 80, with no float left over once the last installment lands', () => {
+  it('Danube: still owes 54% at handover (10% booking + 36% by month 36), so net worth is only the 46% actually paid in', () => {
     const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
-    // Fully paid off by month 80 (56% by handover + 44% over the next 44 months) -> cost-basis
-    // equity reaches the full 1,000,000 with 0% appreciation, 0% rent (base). No imputed rental
-    // credit is added to the float anymore, so it exactly zeroes out once the installments end.
-    expect(data[6].buyerNetWorth).toBe(1000000) // year 7 = month 84, 4 months after month 80 payoff
-    expect(data[6].buyerCashPortion).toBeCloseTo(0, 0)
+    expect(data[2].buyerNetWorth).toBe(460000)
+    expect(data[2].buyerCashPortion).toBeCloseTo(540000, 0) // still tracked, just not counted
+  })
+
+  it('Danube: fully paid off by month 90, with no float left over once the last installment lands', () => {
+    const { data } = runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan: 'DANUBE' })
+    // Fully paid off by month 90 (10% booking + 90 months of 1%) -> cost-basis equity reaches
+    // the full 1,000,000 with 0% appreciation, 0% rent (base). No imputed rental credit is added
+    // to the float anymore, so it exactly zeroes out once the installments end.
+    expect(data[7].buyerNetWorth).toBe(1000000) // year 8 = month 96, 6 months after month 90 payoff
+    expect(data[7].buyerCashPortion).toBeCloseTo(0, 0)
   })
 
   it('Danube: rentalYield input no longer feeds the computation — real Monthly Rent does, via landlordSurplus', () => {
@@ -283,7 +327,7 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     expect(free.data[2].buyerNetWorth - us.data[2].buyerNetWorth).toBeCloseTo(profit * 0.15, 0)
   })
 
-  it('UK flip tax uses the 20% rate (same as the stock drag rate), unlike a 0% held exit', () => {
+  it('UK flip tax uses the 20% rate (same as the stock drag rate, and the same as a non-primary-residence held exit)', () => {
     const uk = runSimulation({
       ...base,
       preHandoverAppreciation: 10,

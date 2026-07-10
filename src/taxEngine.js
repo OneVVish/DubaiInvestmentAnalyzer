@@ -8,10 +8,16 @@ export const RESIDENCE_OPTIONS = ['UAE', 'USA', 'UK', 'Canada', 'India', 'Other'
 // exitTaxPct: tax on a Ready or held-to-handover property's sale profit,
 // under primary-residence rules (the US figure carries a $250K USD
 // exemption — see simulation.js, since converting it needs AED_PER_USD).
+// Only applies when the user marks the property an actual Personal Primary
+// Residence — the default (renting it out, per this app's landlord
+// framing) instead uses flipExitTaxPct, since primary-residence relief
+// legally requires living there, not renting it out.
 //
-// flipExitTaxPct: tax on an off-plan "flip before handover" profit. No
-// citizenship keeps a primary-residence exemption on a property that was
-// never occupied, so this reuses the same rate as stockDragPct, per spec.
+// flipExitTaxPct: tax on an off-plan "flip before handover" profit, and on
+// a Hold exit that isn't a Personal Primary Residence. No citizenship
+// keeps a primary-residence exemption on a property that was never
+// occupied (or is rented out), so this reuses the same rate as
+// stockDragPct, per spec.
 export const TAX_PROFILES = {
   US: {
     key: 'US',

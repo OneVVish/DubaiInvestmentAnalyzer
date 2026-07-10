@@ -234,7 +234,10 @@ export default function PrintReport({
             {isOffPlan ? 'Purchase' : 'Financing'}
           </h2>
           {isOffPlan ? (
-            <InputRow label="Booking Fee (Month 0)" value={`20% (${fmt(downPayment, false)})`} />
+            <InputRow
+              label="Booking Fee (Month 0)"
+              value={`${PAYMENT_PLANS[inputs.developerPlan]?.bookingPct ?? ''}% (${fmt(downPayment, false)})`}
+            />
           ) : (
             <>
               <InputRow label="Down Payment" value={`${inputs.downPaymentPct}% (${fmt(downPayment, false)})`} />
@@ -290,6 +293,7 @@ export default function PrintReport({
           </h2>
           <InputRow label="Citizenship" value={CITIZENSHIP_LABELS[inputs.citizenship] ?? inputs.citizenship} />
           <InputRow label="Tax Residence" value={RESIDENCE_LABELS[inputs.taxResidence] ?? inputs.taxResidence} />
+          <InputRow label="Personal Primary Residence" value={inputs.isPrimaryResidence ? 'Yes' : 'No'} />
 
           <h2 className="mb-2 mt-4 text-sm font-bold uppercase tracking-wide text-slate-500">
             Local Dubai Taxes

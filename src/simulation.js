@@ -1,5 +1,11 @@
 import { resolveTaxProfile, getNetStockReturn } from './taxEngine.js'
-import { buildMilestoneSchedule, amountDueInMonth, cumulativePaidByMonth, HANDOVER_MONTH } from './paymentPlans.js'
+import {
+  buildMilestoneSchedule,
+  amountDueInMonth,
+  cumulativePaidByMonth,
+  HANDOVER_MONTH,
+  PAYMENT_PLANS,
+} from './paymentPlans.js'
 import { AED_PER_USD } from './currency.js'
 import { computeAnnualServiceCharges } from './serviceCharges.js'
 import { computeAnnualizedIRR } from './irr.js'
@@ -8,12 +14,15 @@ export const YEARS = 30
 export const MONTHS = YEARS * 12
 
 // Pre-handover defaults vary by asset class — off-plan construction-phase
-// appreciation in Dubai is commonly quoted much higher (scarcity/pre-launch
-// pricing). Post-handover is a single flat default: once a property is
-// completed and trading on the secondary market, appreciation normalizes
-// toward general market growth, regardless of asset class.
-export const ASSET_CLASS_APPRECIATION_DEFAULTS = { CONDO: 11, VILLA: 20 }
-export const POST_HANDOVER_APPRECIATION_DEFAULT = 5
+// appreciation in Dubai is commonly quoted higher than the secondary
+// market (scarcity/pre-launch pricing), though the 2026 market has
+// moderated well off the 12-22% annual growth seen in 2024-25. Post-
+// handover defaults are also split by asset class — villas have
+// consistently outperformed apartments even on the completed/secondary
+// market (~9-10% vs ~5-6% YoY as of 2026), so a single flat rate for both
+// understates villas' real advantage.
+export const ASSET_CLASS_APPRECIATION_DEFAULTS = { CONDO: 8, VILLA: 12 }
+export const ASSET_CLASS_POSTHANDOVER_APPRECIATION_DEFAULTS = { CONDO: 5, VILLA: 9 }
 export const ASSET_CLASS_SIZE_DEFAULTS = { CONDO: 1200, VILLA: 3500 }
 export const METRO_BONUS_PCT = 1.5
 export const AIRPORT_BONUS_PCT = 2.5
@@ -45,11 +54,18 @@ export function getEffectivePostHandoverAppreciation(inputs) {
   return rate
 }
 
-// Primary-residence exit tax on a Ready or held-to-handover property. The US
-// $250K exemption is USD-denominated; since everything else here is AED,
-// converting just for this comparison (then back) is necessary.
-function computeHoldExitTax(profit, taxProfile) {
+// Exit tax on a Ready or held-to-handover property. Primary-residence
+// relief (the US $250K USD exemption, UK/Canada's 0% rates) legally
+// requires actually living there — it does NOT apply to a rental, which is
+// this app's default framing (Buying collects rent throughout). So unless
+// the user explicitly marks it a Personal Primary Residence, this uses the
+// same non-primary-residence rate already charged on a Flip, with no
+// exemption — only the opt-in path applies exitTaxPct/exemptionUSD.
+function computeHoldExitTax(profit, taxProfile, isPrimaryResidence) {
   if (profit <= 0) return 0
+  if (!isPrimaryResidence) {
+    return profit * (taxProfile.flipExitTaxPct / 100)
+  }
   let taxableProfit = profit
   if (taxProfile.exemptionUSD) {
     const profitUSD = profit / AED_PER_USD
@@ -88,6 +104,7 @@ export function runSimulation(inputs) {
     stockReturn,
     citizenship,
     taxResidence,
+    isPrimaryResidence,
   } = inputs
 
   const taxProfile = resolveTaxProfile(citizenship, taxResidence)
@@ -102,12 +119,15 @@ export function runSimulation(inputs) {
   const schedule = isOffPlan ? buildMilestoneSchedule(developerPlan, propertyPrice) : []
 
   // The Buyer's actual month-0 own-cash outlay — for Ready, the down payment
-  // (the rest is borrowed); for Off-Plan, the 20% booking fee (there's no
-  // mortgage off-plan in this model; the remaining 80% is the buyer's own
-  // money, just not yet due). This is also the Renter's starting capital —
-  // the same "same starting cash, then diverging" comparison RentVsBuy uses,
-  // generalized to off-plan's staged payments below.
-  const downPayment = isOffPlan ? propertyPrice * 0.2 : propertyPrice * (downPaymentPct / 100)
+  // (the rest is borrowed); for Off-Plan, the plan-specific booking fee
+  // (20% for Emaar/Damac, 10% for Danube — there's no mortgage off-plan in
+  // this model; the remainder is the buyer's own money, just not yet due).
+  // This is also the Renter's starting capital — the same "same starting
+  // cash, then diverging" comparison RentVsBuy uses, generalized to
+  // off-plan's staged payments below.
+  const downPayment = isOffPlan
+    ? propertyPrice * (PAYMENT_PLANS[developerPlan].bookingPct / 100)
+    : propertyPrice * (downPaymentPct / 100)
   const loanAmount = isOffPlan ? 0 : propertyPrice - downPayment
   const mortgagePayment =
     !isOffPlan && loanAmount > 0 ? calculateMortgagePayment(loanAmount, mortgageRate, mortgageTermYears * 12) : 0
@@ -361,7 +381,7 @@ export function runSimulation(inputs) {
         // remaining developer/mortgage balance, and the exit tax.
         const remainingBalance = isOffPlan ? Math.max(0, propertyPrice - paidToDeveloper) : loanBalance
         const appreciationGain = homeValue - propertyPrice
-        const exitTax = computeHoldExitTax(appreciationGain, taxProfile)
+        const exitTax = computeHoldExitTax(appreciationGain, taxProfile, isPrimaryResidence)
         costBasisEquity = propertyPrice - remainingBalance
         appreciationGainNet = appreciationGain - exitTax - homeValue * (sellingCostPct / 100)
         cashPortion = isOffPlan ? buyerPool : 0
