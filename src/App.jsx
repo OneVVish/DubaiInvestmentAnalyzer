@@ -297,18 +297,19 @@ export default function App() {
   // those doesn't re-run the geolocation lookup every time.
   const [visitorContext, setVisitorContext] = useState(null)
 
-  // Fires once on mount only (not on every input edit) — logs whatever
-  // scenario is active at that moment ("where it was opened"), then, only
-  // on a genuinely fresh visit (no shared link, no saved defaults already
-  // in play — those are more specific signals than a generic location
-  // guess), pre-fills currency and Global Tax Profile from the same
-  // geolocation lookup, reusing the exact cascade the manual Citizenship/
-  // Tax Residence dropdowns already trigger.
+  // Fires once on mount only (not on every input edit) — no logging here
+  // (a page load/refresh alone shouldn't add a row; only the explicit
+  // Share/Export/Download/Save actions further down do). Resolves the
+  // geolocation lookup once, cached for those action loggers to reuse, and,
+  // only on a genuinely fresh visit (no shared link, no saved defaults
+  // already in play — those are more specific signals than a generic
+  // location guess), pre-fills currency and Global Tax Profile from it,
+  // reusing the exact cascade the manual Citizenship/Tax Residence
+  // dropdowns already trigger.
   useEffect(() => {
     if (isAdminView) return
     collectVisitorContext().then((visitor) => {
       setVisitorContext(visitor)
-      logScenario(inputs, visitor, 'open')
       if (!sharedState?.inputs && !loadUserDefaults()) {
         const geo = getGeoDefaults(visitor.country_code)
         if (geo) {
