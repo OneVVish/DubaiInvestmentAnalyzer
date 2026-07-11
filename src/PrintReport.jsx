@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts'
 import { formatCurrency } from './format.js'
-import { HANDOVER_MONTH, PAYMENT_PLANS } from './paymentPlans.js'
+import { PAYMENT_PLANS } from './paymentPlans.js'
 import { COMMUNITIES } from './communities.js'
 import { computeAnnualServiceCharges } from './serviceCharges.js'
 import { resolveTaxProfile } from './taxEngine.js'
@@ -40,8 +40,16 @@ export default function PrintReport({
   effectivePostHandoverAppreciation,
   flipCAGR,
   isFlip,
-  flipYear,
+  flipMonth,
+  flipYearsLabel,
   offPlanMonthlyInstallment,
+  buyerIRR,
+  renterIRR,
+  roiChartData,
+  buyerMoic,
+  renterMoic,
+  netRentalYieldPct,
+  cashOnCashPct,
 }) {
   const buyerWinsAt30 = finalYear && finalYear.buyerNetWorth > finalYear.renterNetWorth
   const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
@@ -66,12 +74,12 @@ export default function PrintReport({
           {isFlip
             ? breakEven
               ? `Dubai Property overtakes the Alternate Investment by the flip, in month ${breakEven}.`
-              : `The Alternate Investment still beats Dubai Property at the flip (month ${HANDOVER_MONTH}).`
+              : `The Alternate Investment still beats Dubai Property at the flip (month ${flipMonth}).`
             : breakEven
               ? `Dubai Property overtakes the Alternate Investment in year ${breakEven}.`
               : 'Over 30 years, the Alternate Investment beats Dubai Property in this scenario.'}
         </p>
-        <div className={`grid gap-4 ${isFlip ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <div className="grid grid-cols-3 gap-4">
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
               {isOffPlan ? 'Installment / mo (Construction)' : 'Mortgage (P&amp;I) / mo'}
@@ -82,7 +90,7 @@ export default function PrintReport({
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
-              {isFlip ? `Dubai Property Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Dubai Property Net Worth (Yr 30)'}
+              {isFlip ? `Dubai Property Net Worth (at Flip, Mo ${flipMonth})` : 'Dubai Property Net Worth (Yr 30)'}
             </p>
             <p className={`text-lg font-bold ${buyerWinsAt30 ? 'text-amber-600' : ''}`}>
               {finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
@@ -90,7 +98,7 @@ export default function PrintReport({
           </div>
           <div className="rounded-lg border border-slate-200 p-3">
             <p className="text-xs text-slate-500">
-              {isFlip ? `Alternate Investment Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Alternate Investment Net Worth (Yr 30)'}
+              {isFlip ? `Alternate Investment Net Worth (at Flip, Mo ${flipMonth})` : 'Alternate Investment Net Worth (Yr 30)'}
             </p>
             <p className={`text-lg font-bold ${!buyerWinsAt30 ? 'text-sky-600' : ''}`}>
               {finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
@@ -98,18 +106,46 @@ export default function PrintReport({
           </div>
           {isFlip && (
             <div className="rounded-lg border border-slate-200 p-3">
-              <p className="text-xs text-slate-500">Flip IRR ({flipYear}-yr)</p>
+              <p className="text-xs text-slate-500">Flip IRR ({flipYearsLabel}-yr)</p>
               <p className="text-lg font-bold text-emerald-600">
                 {flipCAGR != null ? `${(flipCAGR * 100).toFixed(1)}%` : '-'}
               </p>
             </div>
+          )}
+          {!isFlip && (
+            <>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-xs text-slate-500">Dubai Property Annualized Return (30-yr)</p>
+                <p className="text-lg font-bold text-emerald-600">
+                  {buyerIRR != null ? `${(buyerIRR * 100).toFixed(1)}%` : '-'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-xs text-slate-500">Alternate Investment Annualized Return (30-yr)</p>
+                <p className="text-lg font-bold text-emerald-600">
+                  {renterIRR != null ? `${(renterIRR * 100).toFixed(1)}%` : '-'}
+                </p>
+              </div>
+            </>
+          )}
+          {!isOffPlan && (
+            <>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-xs text-slate-500">Net Rental Yield (Yr 1)</p>
+                <p className="text-lg font-bold">{netRentalYieldPct != null ? `${netRentalYieldPct.toFixed(2)}%` : '-'}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-xs text-slate-500">Cash-on-Cash Return (Yr 1)</p>
+                <p className="text-lg font-bold">{cashOnCashPct != null ? `${cashOnCashPct.toFixed(1)}%` : '-'}</p>
+              </div>
+            </>
           )}
         </div>
       </section>
 
       <section className="mb-6" style={{ breakInside: 'avoid' }}>
         <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
-          {isFlip ? `Net Worth Projection Through the Flip (Month ${HANDOVER_MONTH})` : '30-Year Net Worth Projection'}
+          {isFlip ? `Net Worth Projection Through the Flip (Month ${flipMonth})` : '30-Year Net Worth Projection'}
         </h2>
         <div className="h-[280px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -207,6 +243,81 @@ export default function PrintReport({
                 />
               )}
             </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section className="mb-6" style={{ breakInside: 'avoid' }}>
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+          Alternate Investment: Contributed Capital vs Growth
+        </h2>
+        <p className="mb-3 text-sm">
+          Contributed Capital is cash actually put in so far — the starting capital plus every
+          month's mortgage payment (or off-plan developer installment) that would have gone into
+          building home equity, same figures as the Dubai Property chart above, just invested here
+          instead. Investment Growth is everything above that from compounding. Together, these two
+          are Alternate Investment Net Worth — the Alternate Investment line in the first chart.
+        </p>
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey={isFlip ? 'month' : 'year'} stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
+              <YAxis
+                stroke="#475569"
+                tick={{ fill: '#475569', fontSize: 11 }}
+                tickFormatter={(v) => fmt(v)}
+                width={65}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine y={0} stroke="#94a3b8" />
+              <Bar dataKey="renterContributed" name="Contributed Capital" stackId="renter" fill="#38bdf8" isAnimationActive={false} />
+              <Bar dataKey="renterGrowth" name="Investment Growth" stackId="renter" fill="#22c55e" isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section className="mb-6" style={{ breakInside: 'avoid' }}>
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Return on Investment Over Time</h2>
+        <p className="mb-3 text-sm">
+          Return relative to capital actually invested so far, not Net Worth itself.{' '}
+          {isFlip ? `As of the flip (month ${flipMonth})` : 'As of Year 30'}, Dubai Property is{' '}
+          {buyerMoic != null ? `${buyerMoic.toFixed(1)}x` : '-'} your invested capital, vs.
+          Alternate Investment's {renterMoic != null ? `${renterMoic.toFixed(1)}x` : '-'}.
+        </p>
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={roiChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey={isFlip ? 'month' : 'year'} stroke="#475569" tick={{ fill: '#475569', fontSize: 11 }} />
+              <YAxis
+                stroke="#475569"
+                tick={{ fill: '#475569', fontSize: 11 }}
+                tickFormatter={(v) => `${v.toFixed(0)}%`}
+                width={55}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine y={0} stroke="#94a3b8" />
+              <Line
+                type="monotone"
+                dataKey="buyerROIPct"
+                name="Dubai Property"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="renterROIPct"
+                name="Alternate Investment"
+                stroke="#0284c7"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
           </ResponsiveContainer>
         </div>
       </section>
@@ -321,7 +432,7 @@ export default function PrintReport({
 
       <footer className="border-t border-slate-200 pt-3 text-xs text-slate-400">
         {isFlip &&
-          `Chart and figures above stop at the flip (month ${HANDOVER_MONTH}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
+          `Chart and figures above stop at the flip (month ${flipMonth}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
         Tax calculations are simplified estimates based on standard 2026 tax rules — Hold exits
         default to investment-property rates unless marked a Personal Primary Residence (Global
         Tax Profile). Off-plan milestones, appreciation, and rental income are estimates; the

@@ -30,10 +30,10 @@ import {
   resolveTaxProfile,
   computeRentalIncomeTaxPct,
 } from './taxEngine.js'
-import { HANDOVER_MONTH, PAYMENT_PLANS, amountDueInMonth, buildMilestoneSchedule } from './paymentPlans.js'
+import { PAYMENT_PLANS, amountDueInMonth, buildMilestoneSchedule } from './paymentPlans.js'
 import { COMMUNITIES } from './communities.js'
 import { computeAnnualServiceCharges, getServiceChargeRate } from './serviceCharges.js'
-import { DUBAI_AVERAGE_YIELD_PCT, computeGrossYieldPct, getRentalYield } from './rentalYield.js'
+import { DUBAI_AVERAGE_YIELD_PCT, computeGrossYieldPct, computeNetYieldPct, getRentalYield } from './rentalYield.js'
 import { getPricePerSqft } from './pricePerSqft.js'
 import { CURRENCIES } from './currency.js'
 import { formatCurrency } from './format.js'
@@ -266,17 +266,27 @@ export default function App() {
   const handleTaxResidenceChange = (taxResidence) =>
     setInputs((prev) => applyTaxProfileDefaults(prev, prev.citizenship, taxResidence))
 
-  const { data, flipMonthlyData, mortgagePayment, downPayment, breakEvenYear, flipCAGR } = useMemo(
-    () => runSimulation(inputs),
-    [inputs],
-  )
+  const {
+    data,
+    flipMonthlyData,
+    flipMonth,
+    mortgagePayment,
+    downPayment,
+    breakEvenYear,
+    flipCAGR,
+    buyerIRR,
+    renterIRR,
+  } = useMemo(() => runSimulation(inputs), [inputs])
   const effectivePreHandoverAppreciation = getEffectivePreHandoverAppreciation(inputs)
   const effectivePostHandoverAppreciation = getEffectivePostHandoverAppreciation(inputs)
   const taxProfile = resolveTaxProfile(inputs.citizenship, inputs.taxResidence)
   const rentalIncomeTaxPct = computeRentalIncomeTaxPct(inputs, taxProfile)
   const isOffPlan = inputs.propertyStatus === 'OFFPLAN'
   const isFlip = isOffPlan && inputs.exitStrategy === 'FLIP'
-  const flipYear = HANDOVER_MONTH / 12
+  // Display-only label for the Flip IRR stat — the flip point now tracks
+  // the chosen plan's own final installment (flipMonth), not always month
+  // 36, so this can come out fractional (e.g. 6.7-yr for Danube).
+  const flipYearsLabel = flipMonth != null ? (flipMonth % 12 === 0 ? flipMonth / 12 : (flipMonth / 12).toFixed(1)) : null
 
   // Off-plan has no mortgage, but it does have a real recurring monthly
   // obligation — the regular construction-period installment (excludes the
@@ -291,18 +301,54 @@ export default function App() {
     return amountDueInMonth(schedule, 1)
   }, [isOffPlan, inputs.developerPlan, inputs.propertyPrice])
 
-  // A flipped contract's story is over at handover — the buyer no longer
-  // tracks home equity or rent past that point (see simulation.js), so the
-  // remaining ~27 years are just generic compounding, not property-specific.
-  // Show the flip's own monthly-granularity data instead of the yearly
-  // series — its whole story fits inside 36 months, too coarse to see
-  // month-by-month at yearly resolution — instead of implying 30 years of
-  // real estate insight that isn't there.
+  // A flipped contract's story is over once its plan is fully paid off (see
+  // simulation.js's flipMonth) — the buyer no longer tracks home equity or
+  // rent past that point, so whatever years remain are just generic
+  // compounding, not property-specific. Show the flip's own monthly-
+  // granularity data instead of the yearly series — its whole story fits
+  // inside flipMonth months, too coarse to see month-by-month at yearly
+  // resolution — instead of implying 30 years of real estate insight that
+  // isn't there.
   const chartData = isFlip ? flipMonthlyData : data
   const finalYear = chartData[chartData.length - 1]
   const displayBreakEven = isFlip
     ? chartData.find((d) => d.buyerNetWorth > d.renterNetWorth)?.month ?? null
     : breakEvenYear
+
+  // ROI% = return relative to capital actually invested so far, not the
+  // full net worth — needs its own "capital invested" baseline at every
+  // point, unlike Net Worth above. buyerCapitalInvested/renterContributed
+  // (see simulation.js) already track that, uncompounded, per row.
+  const roiPct = (netWorth, capitalInvested) =>
+    capitalInvested > 0 ? ((netWorth - capitalInvested) / capitalInvested) * 100 : null
+  const roiChartData = useMemo(
+    () =>
+      chartData.map((d) => ({
+        ...d,
+        buyerROIPct: roiPct(d.buyerNetWorth, d.buyerCapitalInvested),
+        renterROIPct: roiPct(d.renterNetWorth, d.renterContributed),
+      })),
+    [chartData],
+  )
+  const finalROI = roiChartData[roiChartData.length - 1]
+  // Money Multiple (MOIC) — "how many times your invested capital" — a
+  // simple complement to ROI%, read from the same final row.
+  const buyerMoic = finalYear && finalYear.buyerCapitalInvested > 0 ? finalYear.buyerNetWorth / finalYear.buyerCapitalInvested : null
+  const renterMoic = finalYear && finalYear.renterContributed > 0 ? finalYear.renterNetWorth / finalYear.renterContributed : null
+
+  // Landlord yield metrics, Ready only — off-plan's rent timing (construction,
+  // then a variable handover point per plan) makes a single "Year 1" figure
+  // misleading there. Both read straight from inputs/Year 1, not a whole
+  // simulated trajectory — a quick "as of today" sanity check, same spirit
+  // as the Monthly Rent slider's existing "implied gross yield" note.
+  const annualCarryingCosts =
+    computeAnnualServiceCharges(inputs.propertySizeSqft, inputs.serviceChargeRate) +
+    inputs.homeInsuranceAnnual +
+    inputs.yearlyMaintenance
+  const netRentalYieldPct = !isOffPlan
+    ? computeNetYieldPct(inputs.monthlyRent * 12, annualCarryingCosts, inputs.propertyPrice)
+    : null
+  const cashOnCashPct = !isOffPlan && downPayment > 0 ? (data[0].buyerLandlordSurplus / downPayment) * 100 : null
 
   const fmt = (value, compact = true) => formatCurrency(value, displayCurrency, compact)
 
@@ -770,7 +816,7 @@ export default function App() {
                   max={50}
                   step={0.1}
                   format={(v) => `${v.toFixed(1)}%`}
-                  description="Applied to the property's appreciation gain on a Hold exit that isn't a Personal Primary Residence, and always on a Flip. A genuine Personal Primary Residence (toggle below) instead uses statutory relief, not this rate."
+                  description="Applied to the property's appreciation gain on any exit — Hold or Flip — that isn't a Personal Primary Residence. A genuine Personal Primary Residence (toggle below) instead uses statutory relief, not this rate, on either exit."
                 />
               )}
               <Toggle
@@ -797,7 +843,7 @@ export default function App() {
                 {isFlip
                   ? displayBreakEven
                     ? `Dubai Property overtakes the Alternate Investment by the flip, in month ${displayBreakEven}.`
-                    : `The Alternate Investment still beats Dubai Property at the flip (month ${HANDOVER_MONTH}).`
+                    : `The Alternate Investment still beats Dubai Property at the flip (month ${flipMonth}).`
                   : displayBreakEven
                     ? `Dubai Property overtakes the Alternate Investment in year ${displayBreakEven}.`
                     : 'Over 30 years, the Alternate Investment beats Dubai Property in this scenario.'}
@@ -821,31 +867,63 @@ export default function App() {
                   }
                 />
                 <StatCard
-                  label={isFlip ? `Dubai Property Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Dubai Property Net Worth (Yr 30)'}
+                  label={isFlip ? `Dubai Property Net Worth (at Flip, Mo ${flipMonth})` : 'Dubai Property Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.buyerNetWorth, false) : '-'}
                   accentClass={buyerWinsAt30 ? 'text-amber-400' : 'text-slate-300'}
                   tooltip="Ready/Off-Plan-Hold: home value if sold this year, minus selling costs, any remaining balance, and exit tax (full investment-property rate by default, unless Personal Primary Residence is on below) — plus accumulated rental surplus (rent collected, net of vacancy, minus the mortgage/installment and carrying costs, reinvested). Off-Plan-Flip: the reinvested flip proceeds, right at the moment of the flip."
                 />
                 <StatCard
-                  label={isFlip ? `Alternate Investment Net Worth (at Flip, Mo ${HANDOVER_MONTH})` : 'Alternate Investment Net Worth (Yr 30)'}
+                  label={isFlip ? `Alternate Investment Net Worth (at Flip, Mo ${flipMonth})` : 'Alternate Investment Net Worth (Yr 30)'}
                   value={finalYear ? fmt(finalYear.renterNetWorth, false) : '-'}
                   accentClass={!buyerWinsAt30 ? 'text-rose-400' : 'text-slate-300'}
                   tooltip="Starting capital equal to Dubai Property's own month-0 cash outlay, plus every month's mortgage payment (or off-plan developer installment) that would have gone into building home equity — invested here instead, compounding at your Global Tax Profile's net stock return. Rent isn't part of this comparison; it's Dubai Property's own rental income (Invested Rental Surplus)."
                 />
                 {isFlip && (
                   <StatCard
-                    label={`Flip IRR (${flipYear}-yr)`}
+                    label={`Flip IRR (${flipYearsLabel}-yr)`}
                     value={flipCAGR != null ? `${(flipCAGR * 100).toFixed(1)}%` : '-'}
                     accentClass="text-emerald-400"
                     tooltip="A true internal rate of return, not a simple lump-sum CAGR — it accounts for exactly when each booking fee, installment, and the DLD fee were paid, not just the total invested. Since it's on capital actually paid in (not the full price), it's a leveraged figure — part of the price was never at risk."
                   />
+                )}
+                {!isFlip && (
+                  <>
+                    <StatCard
+                      label="Dubai Property Annualized Return (30-yr)"
+                      value={buyerIRR != null ? `${(buyerIRR * 100).toFixed(1)}%` : '-'}
+                      accentClass="text-emerald-400"
+                      tooltip="A true internal rate of return over the full 30 years, not Net Worth alone — it accounts for exactly when each mortgage/installment payment and rental cash flow landed, ending with the property's Year-30 value if sold then."
+                    />
+                    <StatCard
+                      label="Alternate Investment Annualized Return (30-yr)"
+                      value={renterIRR != null ? `${(renterIRR * 100).toFixed(1)}%` : '-'}
+                      accentClass="text-emerald-400"
+                      tooltip="Same true-IRR treatment as the Dubai Property figure, over the same monthly contributions — for a lump-sum-only Ready purchase (100% down), this converges to your Global Tax Profile's net stock return exactly."
+                    />
+                  </>
+                )}
+                {!isOffPlan && (
+                  <>
+                    <StatCard
+                      label="Net Rental Yield (Yr 1)"
+                      value={netRentalYieldPct != null ? `${netRentalYieldPct.toFixed(2)}%` : '-'}
+                      accentClass="text-white"
+                      tooltip="Annual rent minus annual carrying costs (service charges, insurance, maintenance) — not vacancy or financing — divided by Property Price. A quick after-costs complement to the Monthly Rent slider's gross-yield note above; changes over time with Rent/Cost Inflation, shown here as of Year 1."
+                    />
+                    <StatCard
+                      label="Cash-on-Cash Return (Yr 1)"
+                      value={cashOnCashPct != null ? `${cashOnCashPct.toFixed(1)}%` : '-'}
+                      accentClass="text-white"
+                      tooltip="Year 1's after-tax rental profit (rent minus mortgage payment and carrying costs) divided by the Down Payment — the annual yield on the cash you actually put in, not the full price. Fluctuates with Rent/Cost Inflation in later years."
+                    />
+                  </>
                 )}
               </div>
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
               <h3 className="mb-4 text-sm font-semibold text-slate-300">
-                {isFlip ? `Net Worth Projection Through the Flip (Month ${HANDOVER_MONTH})` : '30-Year Net Worth Projection'}
+                {isFlip ? `Net Worth Projection Through the Flip (Month ${flipMonth})` : '30-Year Net Worth Projection'}
               </h3>
               <div className="h-[420px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -910,7 +988,7 @@ export default function App() {
               </div>
               <p className="mt-4 text-xs text-slate-500">
                 {isFlip &&
-                  `Chart and figures above stop at the flip (month ${HANDOVER_MONTH}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
+                  `Chart and figures above stop at the flip (month ${flipMonth}) — past that point the Dubai Property path is just a generic reinvested portfolio, not a real estate projection. `}
                 Tax calculations are simplified estimates based on standard 2026 tax rules — Hold
                 exits default to investment-property rates unless marked a Personal Primary
                 Residence (Global Tax Profile). Off-plan milestones, appreciation, and rental
@@ -978,6 +1056,129 @@ export default function App() {
                 </ResponsiveContainer>
               </div>
             </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
+              <h3 className="mb-1 text-sm font-semibold text-slate-300">
+                Alternate Investment: Contributed Capital vs Growth
+              </h3>
+              <p className="mb-4 text-xs text-slate-500">
+                Contributed Capital is cash actually put in so far — the starting capital plus
+                every month's mortgage payment (or off-plan developer installment) that would have
+                gone into building home equity, same figures as the Dubai Property chart above, just
+                invested here instead. Investment Growth is everything above that from compounding.
+                Together, these two are Alternate Investment Net Worth — the Alternate Investment
+                line in the Net Worth chart above.
+              </p>
+              <div className="h-[360px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis
+                      dataKey={isFlip ? 'month' : 'year'}
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      label={{
+                        value: isFlip ? 'Months' : 'Years',
+                        position: 'insideBottom',
+                        offset: -3,
+                        fill: '#64748b',
+                      }}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tickFormatter={(v) => fmt(v)}
+                      width={70}
+                    />
+                    <Tooltip
+                      formatter={tooltipFormatter(fmt)}
+                      labelFormatter={(value) => (isFlip ? `Month ${value}` : `Year ${value}`)}
+                      contentStyle={{
+                        backgroundColor: '#0f172a',
+                        border: '1px solid #334155',
+                        borderRadius: '0.75rem',
+                        color: '#e2e8f0',
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10 }} />
+                    <ReferenceLine y={0} stroke="#475569" />
+                    <Bar dataKey="renterContributed" name="Contributed Capital" stackId="renter" fill="#38bdf8" />
+                    <Bar dataKey="renterGrowth" name="Investment Growth" stackId="renter" fill="#22c55e" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/20">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-300">Return on Investment Over Time</h3>
+                  <p className="mt-1 max-w-xl text-xs text-slate-500">
+                    Return relative to capital actually invested so far (Contributed Capital, or its
+                    Dubai Property equivalent) — not Net Worth itself, which mixes leverage/timing
+                    effects in. {isFlip ? `As of the flip (month ${flipMonth})` : 'As of Year 30'},
+                    Dubai Property is {finalROI?.buyerROIPct != null ? `${finalROI.buyerROIPct.toFixed(0)}%` : '-'}{' '}
+                    ({buyerMoic != null ? `${buyerMoic.toFixed(1)}x` : '-'}) vs. Alternate Investment's{' '}
+                    {finalROI?.renterROIPct != null ? `${finalROI.renterROIPct.toFixed(0)}%` : '-'} (
+                    {renterMoic != null ? `${renterMoic.toFixed(1)}x` : '-'}).
+                  </p>
+                </div>
+              </div>
+              <div className="h-[360px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={roiChartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis
+                      dataKey={isFlip ? 'month' : 'year'}
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      label={{
+                        value: isFlip ? 'Months' : 'Years',
+                        position: 'insideBottom',
+                        offset: -3,
+                        fill: '#64748b',
+                      }}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 12 }}
+                      tickFormatter={(v) => `${v.toFixed(0)}%`}
+                      width={60}
+                    />
+                    <Tooltip
+                      formatter={(value, name) => [`${value.toFixed(1)}%`, name]}
+                      labelFormatter={(value) => (isFlip ? `Month ${value}` : `Year ${value}`)}
+                      contentStyle={{
+                        backgroundColor: '#0f172a',
+                        border: '1px solid #334155',
+                        borderRadius: '0.75rem',
+                        color: '#e2e8f0',
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 13, paddingTop: 10 }} />
+                    <ReferenceLine y={0} stroke="#475569" />
+                    <Line
+                      type="monotone"
+                      dataKey="buyerROIPct"
+                      name="Dubai Property"
+                      stroke="#f59e0b"
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 5 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="renterROIPct"
+                      name="Alternate Investment"
+                      stroke="#38bdf8"
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -994,8 +1195,16 @@ export default function App() {
         effectivePostHandoverAppreciation={effectivePostHandoverAppreciation}
         flipCAGR={flipCAGR}
         isFlip={isFlip}
-        flipYear={flipYear}
+        flipMonth={flipMonth}
+        flipYearsLabel={flipYearsLabel}
         offPlanMonthlyInstallment={offPlanMonthlyInstallment}
+        buyerIRR={buyerIRR}
+        renterIRR={renterIRR}
+        roiChartData={roiChartData}
+        buyerMoic={buyerMoic}
+        renterMoic={renterMoic}
+        netRentalYieldPct={netRentalYieldPct}
+        cashOnCashPct={cashOnCashPct}
       />
     </div>
   )

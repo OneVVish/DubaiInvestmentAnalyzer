@@ -41,3 +41,11 @@ export function getRentalYield(communityKey, assetClass) {
 export function computeGrossYieldPct(annualRent, propertyPrice) {
   return (annualRent / propertyPrice) * 100
 }
+
+// Net of the owner's own carrying costs (service charges, insurance,
+// maintenance) — not vacancy or financing, which vary by scenario and are
+// already handled in simulation.js. A simpler, input-level complement to
+// the gross yield above, for a quick "after costs" sanity check.
+export function computeNetYieldPct(annualRent, annualCarryingCosts, propertyPrice) {
+  return ((annualRent - annualCarryingCosts) / propertyPrice) * 100
+}

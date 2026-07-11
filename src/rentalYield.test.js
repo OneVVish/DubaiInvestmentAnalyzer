@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeGrossYieldPct, getRentalYield } from './rentalYield.js'
+import { computeGrossYieldPct, computeNetYieldPct, getRentalYield } from './rentalYield.js'
 
 describe('getRentalYield', () => {
   it('returns the apartment yield for a condo in a covered community', () => {
@@ -23,5 +23,19 @@ describe('getRentalYield', () => {
 describe('computeGrossYieldPct', () => {
   it('matches the standard gross yield formula', () => {
     expect(computeGrossYieldPct(105000, 1500000)).toBeCloseTo(7, 6)
+  })
+})
+
+describe('computeNetYieldPct', () => {
+  it('subtracts carrying costs from rent before dividing by price', () => {
+    expect(computeNetYieldPct(105000, 25000, 1500000)).toBeCloseTo((105000 - 25000) / 1500000 * 100, 6)
+  })
+
+  it('matches gross yield when carrying costs are 0', () => {
+    expect(computeNetYieldPct(105000, 0, 1500000)).toBeCloseTo(computeGrossYieldPct(105000, 1500000), 6)
+  })
+
+  it('can go negative when carrying costs exceed rent', () => {
+    expect(computeNetYieldPct(10000, 25000, 1500000)).toBeLessThan(0)
   })
 })

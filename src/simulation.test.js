@@ -258,11 +258,12 @@ describe('runSimulation — DLD transfer fee', () => {
     expect(withFee.data[0].renterNetWorth - noFee.data[0].renterNetWorth).toBeCloseTo(40000, 0)
   })
 
-  it('Off-Plan Flip: still charged — it was already paid at booking, before the flip decision', () => {
+  it('Off-Plan Flip: like Hold, the DLD fee only touches the excluded float, never the sale proceeds', () => {
     const withFee = runSimulation({
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
+      developerPlan: 'EMAAR',
       preHandoverAppreciation: 10,
       dldFeePct: 4,
     })
@@ -270,10 +271,11 @@ describe('runSimulation — DLD transfer fee', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
+      developerPlan: 'EMAAR',
       preHandoverAppreciation: 10,
       dldFeePct: 0,
     })
-    expect(noFee.data[2].buyerNetWorth - withFee.data[2].buyerNetWorth).toBeCloseTo(40000, 0)
+    expect(withFee.flipMonthlyData[35].buyerNetWorth).toBe(noFee.flipMonthlyData[35].buyerNetWorth)
   })
 
   it('a 50% waiver halves the effective fee', () => {
@@ -290,11 +292,12 @@ describe('runSimulation — DLD transfer fee', () => {
     expect(waived.data[0]).toEqual(noFee.data[0])
   })
 
-  it('a waiver also reduces what the flipper already sunk into the fee', () => {
+  it("a DLD waiver has no effect on a Flip's own sale proceeds either — same excluded-float parity as Hold", () => {
     const full = runSimulation({
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
+      developerPlan: 'EMAAR',
       preHandoverAppreciation: 10,
       dldFeePct: 4,
       dldWaiverPct: 0,
@@ -303,44 +306,66 @@ describe('runSimulation — DLD transfer fee', () => {
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
+      developerPlan: 'EMAAR',
       preHandoverAppreciation: 10,
       dldFeePct: 4,
       dldWaiverPct: 100,
     })
-    expect(waived.data[2].buyerNetWorth - full.data[2].buyerNetWorth).toBeCloseTo(40000, 0)
+    expect(waived.flipMonthlyData[35].buyerNetWorth).toBe(full.flipMonthlyData[35].buyerNetWorth)
   })
 })
 
 describe('runSimulation — Off-plan, Flip Before Handover', () => {
-  it('matches the spec formulas for V36, cashRealized, and profit (tax-free)', () => {
-    const { data } = runSimulation({
+  it('flipMonth is 36 for a plan that finishes exactly at handover (Emaar) — same as HANDOVER_MONTH', () => {
+    const { flipMonth } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    expect(flipMonth).toBe(36)
+  })
+
+  it("for Emaar, the flip's sale proceeds exactly match what Hold reports at that same month — Flip is now Hold, truncated at payoff", () => {
+    const flip = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
     })
-    const v36 = 1000000 * 1.1 ** 3
-    const remainingObligation = 216666.6666667 // Emaar's month-36 due amount (20% lump + last installment)
-    const cashRealized = v36 - remainingObligation
-    expect(data[2].buyerNetWorth).toBeCloseTo(cashRealized, 0)
-  })
-
-  it('CAGR is a true IRR — exceeds the naive lump-sum CAGR, since staged installments had less time to grow', () => {
-    const { data, flipCAGR } = runSimulation({
+    const hold = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
       developerPlan: 'EMAAR',
-      exitStrategy: 'FLIP',
+      exitStrategy: 'HOLD',
     })
-    const investedSoFar = 1000000 - 216666.6666667 // paid in through month 35, excluding the skipped handover milestone
-    const naiveLumpSumCagr = (data[2].buyerNetWorth / investedSoFar) ** (1 / 3) - 1
-    expect(flipCAGR).toBeGreaterThan(naiveLumpSumCagr)
-    expect(flipCAGR).toBeGreaterThan(0.1) // sanity: leveraged return exceeds the 10% raw appreciation rate
+    expect(flip.flipMonthlyData[35].buyerNetWorth).toBe(hold.data[2].buyerNetWorth)
   })
 
-  it('CAGR matches an independently-built monthly cash-flow IRR', () => {
+  it("flipMonth tracks the chosen plan's own final installment — well past handover for long-tail plans", () => {
+    const flipMonthFor = (developerPlan) =>
+      runSimulation({ ...base, propertyStatus: 'OFFPLAN', developerPlan, exitStrategy: 'FLIP' }).flipMonth
+    expect(flipMonthFor('BALANCED_5050')).toBe(72)
+    expect(flipMonthFor('AGGRESSIVE_4060')).toBe(96)
+    expect(flipMonthFor('DANUBE')).toBe(80)
+    expect(flipMonthFor('DANUBE_CLASSIC')).toBe(90)
+  })
+
+  it('a long-tail Flip starts collecting rent from month 37 onward, same as Hold — no rent up through handover itself', () => {
+    const { flipMonthlyData } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'DANUBE',
+      exitStrategy: 'FLIP',
+      monthlyRent: 8000,
+    })
+    expect(flipMonthlyData.find((d) => d.month === 36).buyerLandlordSurplus).toBe(0)
+    expect(flipMonthlyData.find((d) => d.month === 37).buyerLandlordSurplus).toBeGreaterThan(0)
+  })
+
+  it('CAGR is a true IRR — exceeds a naive lump-sum CAGR on the full price paid in, since staged installments had less time to grow', () => {
     const { flipCAGR } = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
@@ -348,14 +373,44 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
       developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
     })
-    // Booking (20%) at month 0, then 60%/36 per month through month 35 — Emaar's
-    // shape (see paymentPlans.test.js) — followed by the flip payout at month 36.
+    // The full price is paid in by month 36 now (nothing skipped), growing at a
+    // flat 10%/yr for 3 years — a naive final-value/total-invested CAGR is just
+    // the raw rate itself. The true IRR must exceed it: most of that capital
+    // went in well after month 0, so it had less time to compound than a naive
+    // calc assumes.
+    const naiveLumpSumCagr = 0.1
+    expect(flipCAGR).toBeGreaterThan(naiveLumpSumCagr)
+  })
+
+  it('CAGR matches an independently-built monthly cash-flow IRR (every installment paid in full, sale proceeds layered on top of the final month)', () => {
+    const { flipCAGR, flipMonthlyData, flipMonth } = runSimulation({
+      ...base,
+      preHandoverAppreciation: 10,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    // Booking (20%) at month 0, then 60%/36 per month through month 35, plus
+    // Emaar's 20% lump on top of month 36's own installment — Emaar's shape
+    // (see paymentPlans.test.js) — with the sale proceeds landing in that same
+    // month, on top of that installment.
     const monthlyInstallment = (1000000 * 0.6) / 36
-    const cashFlows = [-(1000000 * 0.2), ...Array(35).fill(-monthlyInstallment), null]
-    const v36 = 1000000 * 1.1 ** 3
-    const remainingObligation = 216666.6666667
-    cashFlows[36] = v36 - remainingObligation // tax-free (UAE default), so this is the flip payout in full
+    const cashFlows = [-(1000000 * 0.2), ...Array(35).fill(-monthlyInstallment)]
+    cashFlows[flipMonth] = -(monthlyInstallment + 1000000 * 0.2) + flipMonthlyData[flipMonth - 1].buyerNetWorth
     expect(flipCAGR).toBeCloseTo(computeAnnualizedIRR(cashFlows), 6)
+  })
+
+  it('flipCAGR stays positive and sensible for a long-tail plan too (Danube, flip at month 80)', () => {
+    const { flipCAGR, flipMonth } = runSimulation({
+      ...base,
+      preHandoverAppreciation: 10,
+      postHandoverAppreciation: 5,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'DANUBE',
+      exitStrategy: 'FLIP',
+    })
+    expect(flipMonth).toBe(80)
+    expect(flipCAGR).toBeGreaterThan(0)
   })
 
   it('flipCAGR is null for a Ready property or an Off-Plan Hold', () => {
@@ -363,48 +418,32 @@ describe('runSimulation — Off-plan, Flip Before Handover', () => {
     expect(runSimulation({ ...base, propertyStatus: 'OFFPLAN', exitStrategy: 'HOLD' }).flipCAGR).toBeNull()
   })
 
-  it('a flipped contract loses its primary-residence exemption — taxed at the Capital Gains Tax Rate, no $250K exemption', () => {
-    const free = runSimulation({
+  it('a Flip now respects the Personal Primary Residence exemption, same as Hold (no longer flatly denied)', () => {
+    const withExemption = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
-      exitStrategy: 'FLIP',
-      citizenship: 'UAE/Other',
-      taxResidence: 'UAE',
-    })
-    const us = runSimulation({
-      ...base,
-      preHandoverAppreciation: 10,
-      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
       citizenship: 'USA',
       taxResidence: 'UAE',
       capitalGainsTaxRatePct: 15,
+      isPrimaryResidence: true,
     })
-    const profit = 1000000 * 1.1 ** 3 - 1000000
-    expect(free.data[2].buyerNetWorth - us.data[2].buyerNetWorth).toBeCloseTo(profit * 0.15, 0)
-  })
-
-  it('a Flip is taxed at whatever Capital Gains Tax Rate the user set, unlike a primary-residence Hold exit', () => {
-    const uk = runSimulation({
+    const withoutExemption = runSimulation({
       ...base,
       preHandoverAppreciation: 10,
       propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
       exitStrategy: 'FLIP',
-      citizenship: 'UK',
-      taxResidence: 'UK',
-      capitalGainsTaxRatePct: 20,
-    })
-    const free = runSimulation({
-      ...base,
-      preHandoverAppreciation: 10,
-      propertyStatus: 'OFFPLAN',
-      exitStrategy: 'FLIP',
-      citizenship: 'UAE/Other',
+      citizenship: 'USA',
       taxResidence: 'UAE',
+      capitalGainsTaxRatePct: 15,
+      isPrimaryResidence: false,
     })
-    const profit = 1000000 * 1.1 ** 3 - 1000000
-    expect(free.data[2].buyerNetWorth - uk.data[2].buyerNetWorth).toBeCloseTo(profit * 0.2, 0)
+    expect(withExemption.flipMonthlyData[35].buyerNetWorth).toBeGreaterThan(
+      withoutExemption.flipMonthlyData[35].buyerNetWorth,
+    )
   })
 
   it('after flipping, the buyer path simply compounds and no longer tracks home equity', () => {
@@ -573,18 +612,17 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
     expect(data[3].homeValue).toBe(Math.round(year4))
   })
 
-  it('Flip year: the payout is attributed back to equity paid in vs. appreciation gain, not dumped into cash', () => {
+  it('Flip month: the sale is attributed back to equity paid in vs. appreciation gain, not dumped into cash', () => {
     const { data } = runSimulation({
       ...base,
       propertyStatus: 'OFFPLAN',
       exitStrategy: 'FLIP',
       preHandoverAppreciation: 10,
     })
-    const paidByMonth35 = 1000000 - 216666.6666667 // same Emaar figure used elsewhere in this file
     const v36 = 1000000 * 1.1 ** 3
     const profit = v36 - 1000000
-    expect(data[2].buyerCostBasisEquity).toBeCloseTo(paidByMonth35, 0) // base has 0% dld fee, 0% flip tax
-    expect(data[2].buyerAppreciationGain).toBeCloseTo(profit, 0)
+    expect(data[2].buyerCostBasisEquity).toBe(1000000) // fully paid off by month 36 now (base has 0% dld fee)
+    expect(data[2].buyerAppreciationGain).toBeCloseTo(profit, 0) // base has 0% exit tax
     expect(data[2].buyerCashPortion).toBe(0)
     equityPlusAppreciationEqualsNetWorth(data[2])
   })
@@ -600,6 +638,88 @@ describe('runSimulation — equity vs appreciation breakdown', () => {
     expect(data[3].buyerCostBasisEquity).toBe(0)
     expect(data[3].buyerAppreciationGain).toBe(0)
     expect(data[3].buyerCashPortion).toBe(data[3].buyerNetWorth)
+  })
+})
+
+describe('runSimulation — renterContributed/renterGrowth and buyerCapitalInvested (ROI/breakdown inputs)', () => {
+  it('renterContributed + renterGrowth always equal renterNetWorth', () => {
+    const { data } = runSimulation({
+      ...base,
+      downPaymentPct: 20,
+      mortgageRate: 5,
+      postHandoverAppreciation: 8,
+      stockReturn: 6,
+      monthlyRent: 4000,
+    })
+    // Precision -1 (tolerance < 5) absorbs the +/-1-2 AED drift from rounding
+    // each component independently, same as equityPlusAppreciationEqualsNetWorth above.
+    data.forEach((d) => expect(d.renterContributed + d.renterGrowth).toBeCloseTo(d.renterNetWorth, -1))
+  })
+
+  it('renterContributed grows by exactly the same monthly contribution the Buyer would have made, uncompounded', () => {
+    const { data, downPayment } = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5 })
+    // 0% stock return in `base`, so renterContributed is just a running sum —
+    // year 1's value is the starting capital plus 12 months of mortgage P&I.
+    const { mortgagePayment } = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5 })
+    expect(data[0].renterContributed).toBeCloseTo(downPayment + mortgagePayment * 12, 0)
+  })
+
+  it("buyerCapitalInvested freezes at its pre-flip value once flipped — doesn't reset like buyerCostBasisEquity", () => {
+    const { data, flipMonth } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+    })
+    const atFlipYear = flipMonth / 12 - 1 // data[] is 0-indexed by year
+    const capitalAtFlip = data[atFlipYear].buyerCapitalInvested
+    expect(capitalAtFlip).toBeGreaterThan(0)
+    for (let i = atFlipYear + 1; i < data.length; i++) {
+      expect(data[i].buyerCapitalInvested).toBe(capitalAtFlip)
+      expect(data[i].buyerCostBasisEquity).toBe(0) // resets, unlike buyerCapitalInvested
+    }
+  })
+
+  it('buyerCapitalInvested matches buyerCostBasisEquity before any flip (same underlying cash, not yet frozen)', () => {
+    const { data } = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5, postHandoverAppreciation: 8 })
+    data.forEach((d) => expect(d.buyerCapitalInvested).toBe(d.buyerCostBasisEquity))
+  })
+})
+
+describe('runSimulation — buyerIRR/renterIRR (30-year annualized return)', () => {
+  it("renterIRR converges to exactly the user's net stock return when there's no tax drag", () => {
+    const { renterIRR } = runSimulation({ ...base, downPaymentPct: 20, mortgageRate: 5, stockReturn: 7 })
+    expect(renterIRR).toBeCloseTo(0.07, 4)
+  })
+
+  it('buyerIRR is a true IRR — cross-checks against an independently-built monthly cash-flow array for a 100%-cash Ready purchase', () => {
+    const { data, buyerIRR, downPayment } = runSimulation({
+      ...base,
+      downPaymentPct: 100,
+      postHandoverAppreciation: 8,
+      monthlyRent: 4000,
+    })
+    // 100% cash: no mortgage, so the Buyer's own monthly cash flow is just
+    // the after-tax rental profit each month (0% tax/vacancy in `base`) —
+    // rebuild it independently and confirm the IRR matches.
+    const monthlyRentAfterCosts = 4000 // base has 0% vacancy, 0 carrying costs
+    const cashFlows = [-downPayment, ...Array(360).fill(monthlyRentAfterCosts)] // month 0 + months 1-360
+    cashFlows[360] += data[29].buyerNetWorth
+    expect(buyerIRR).toBeCloseTo(computeAnnualizedIRR(cashFlows), 5)
+  })
+
+  it('buyerIRR/renterIRR are non-null and finite for an Off-Plan Hold too (long, mostly-zero-then-lump cash flows)', () => {
+    const { buyerIRR, renterIRR } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'DANUBE',
+      exitStrategy: 'HOLD',
+      preHandoverAppreciation: 8,
+      postHandoverAppreciation: 6,
+      monthlyRent: 4000,
+    })
+    expect(Number.isFinite(buyerIRR)).toBe(true)
+    expect(Number.isFinite(renterIRR)).toBe(true)
   })
 })
 
