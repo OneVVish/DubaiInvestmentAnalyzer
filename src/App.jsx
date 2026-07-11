@@ -1267,9 +1267,19 @@ export default function App() {
             </div>
           </div>
         </div>
-        <footer className="mt-8 text-center text-xs text-slate-600">
-          Anonymous usage data (scenario inputs and approximate location) is logged for the site
-          owner's analytics.
+        <footer className="mt-8 space-y-2 text-center text-xs text-slate-600">
+          <p>
+            This calculator is provided for illustrative and informational purposes only and does
+            not constitute financial, legal, tax, or investment advice. All figures are estimates
+            based on the assumptions you enter and simplified modeling — they are not guaranteed to
+            be accurate or complete, and actual outcomes may differ materially. Consult a qualified
+            financial, tax, or legal professional before making any real estate or investment
+            decision.
+          </p>
+          <p>
+            Anonymous usage data (scenario inputs and approximate location) is logged for the site
+            owner's analytics.
+          </p>
         </footer>
       </div>
 
