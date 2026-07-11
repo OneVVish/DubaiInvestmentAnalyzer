@@ -3,10 +3,27 @@
 // than Newton-Raphson: every cash-flow series this app feeds in has
 // exactly one sign change (a run of outflows, then one payout), which
 // guarantees exactly one real root and a monotonic NPV curve — bisection
-// can't diverge the way Newton's method sometimes does, and performance
-// doesn't matter here (called once, on ~37 cash flows).
+// can't diverge the way Newton's method sometimes does.
 export function computeAnnualizedIRR(monthlyCashFlows) {
-  const npv = (r) => monthlyCashFlows.reduce((sum, cf, i) => sum + cf / (1 + r) ** i, 0)
+  // Evaluated via Horner's rule (from the last cash flow down to the
+  // first), NOT the textbook sum(cf[i] / (1+r)**i) — for a 30-year, 361-
+  // entry series near the bisection's extreme low bound (r close to -1),
+  // (1+r)**360 underflows to exactly 0, and dividing two different cash
+  // flows by that same 0 produces two independent +/-Infinity terms whose
+  // sum is NaN, silently corrupting every comparison thereafter (NaN
+  // comparisons are always false, so bisection degenerates toward the
+  // upper bound instead of the true root). Horner's rule accumulates one
+  // multiply-add at a time instead, so it saturates to a single, correctly
+  // signed Infinity rather than cancelling two of them into NaN — same
+  // polynomial, numerically stable at any length.
+  const npv = (r) => {
+    const x = 1 / (1 + r)
+    let result = 0
+    for (let i = monthlyCashFlows.length - 1; i >= 0; i--) {
+      result = result * x + monthlyCashFlows[i]
+    }
+    return result
+  }
 
   let low = -0.99
   let high = 10

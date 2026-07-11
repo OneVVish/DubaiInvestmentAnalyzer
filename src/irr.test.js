@@ -38,4 +38,19 @@ describe('computeAnnualizedIRR', () => {
     expect(computeAnnualizedIRR([100, 100, 100])).toBeNull()
     expect(computeAnnualizedIRR([-100, -100, -100])).toBeNull()
   })
+
+  it('stays numerically correct on a long (30-year, 361-entry) series — regression for a bisection-bound underflow', () => {
+    // At the bisection's extreme low bound (r near -1), (1+r)**360 underflows
+    // to exactly 0 for a series this long, and the textbook sum(cf/(1+r)**i)
+    // formula produces two independent +/-Infinity terms that cancel to NaN,
+    // corrupting every comparison thereafter (bisection then silently
+    // degenerates toward the upper bound instead of the true root). A flat
+    // monthly contribution for 30 years, paid out at a known rate, should
+    // solve back to something reasonable, not billions of a percent.
+    const monthlyRate = 0.005
+    const cashFlows = [-1000, ...Array(359).fill(0)]
+    cashFlows[360] = 1000 * (1 + monthlyRate) ** 360
+    const irr = computeAnnualizedIRR(cashFlows)
+    expect(irr).toBeCloseTo((1 + monthlyRate) ** 12 - 1, 4)
+  })
 })
