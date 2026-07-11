@@ -462,7 +462,7 @@ export default function App() {
               <span className="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-transparent">
                 Opportunity Cost
               </span>{' '}
-              Calculator
+              Analyzer
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
               Buy in Dubai's zero-tax market vs. invest the same capital — a 30-year net worth
