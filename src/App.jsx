@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -40,6 +40,9 @@ import { formatCurrency } from './format.js'
 import { buildShareUrl, getStateFromUrl } from './shareState.js'
 import { loadUserDefaults, saveUserDefaults } from './userDefaults.js'
 import { buildCsv, downloadCsv } from './csvExport.js'
+import { collectVisitorContext, logScenario } from './scenarioLog.js'
+import { getGeoDefaults } from './geoDefaults.js'
+import AdminScenarios from './AdminScenarios.jsx'
 import PrintReport from './PrintReport.jsx'
 
 function Slider({ label, value, onChange, min, max, step, format, accent = '#f59e0b', description }) {
@@ -214,6 +217,11 @@ export default function App() {
   const [displayCurrency, setDisplayCurrency] = useState('AED')
   const [copied, setCopied] = useState(false)
   const [savedDefaults, setSavedDefaults] = useState(false)
+  // Hidden, never linked from the normal UI — ?admin=1 swaps the whole
+  // calculator for the passphrase-gated scenario browser (see
+  // AdminScenarios.jsx). State, not a module-level constant, so loading a
+  // scenario from that view can switch back to the normal calculator.
+  const [isAdminView, setIsAdminView] = useState(() => new URLSearchParams(window.location.search).has('admin'))
 
   const setField = (key) => (value) => setInputs((prev) => ({ ...prev, [key]: value }))
 
@@ -265,6 +273,29 @@ export default function App() {
 
   const handleTaxResidenceChange = (taxResidence) =>
     setInputs((prev) => applyTaxProfileDefaults(prev, prev.citizenship, taxResidence))
+
+  // Fires once on mount only (not on every input edit) — logs whatever
+  // scenario is active at that moment ("where it was opened"), then, only
+  // on a genuinely fresh visit (no shared link, no saved defaults already
+  // in play — those are more specific signals than a generic location
+  // guess), pre-fills currency and Global Tax Profile from the same
+  // geolocation lookup, reusing the exact cascade the manual Citizenship/
+  // Tax Residence dropdowns already trigger.
+  useEffect(() => {
+    if (isAdminView) return
+    collectVisitorContext().then((visitor) => {
+      logScenario(inputs, visitor)
+      if (!sharedState?.inputs && !loadUserDefaults()) {
+        const geo = getGeoDefaults(visitor.country_code)
+        if (geo) {
+          setDisplayCurrency(geo.currency)
+          setInputs((prev) => applyTaxProfileDefaults(prev, geo.citizenship, geo.taxResidence))
+        }
+      }
+    })
+    // Deliberately empty — see comment above; must run exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const {
     data,
@@ -379,6 +410,17 @@ export default function App() {
   }
 
   const handleResetToDefaults = () => setInputs({ ...DEFAULT_INPUTS, ...loadUserDefaults() })
+
+  if (isAdminView) {
+    const handleLoadScenario = (scenario) => {
+      setInputs({ ...DEFAULT_INPUTS, ...scenario })
+      setIsAdminView(false)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('admin')
+      window.history.replaceState(null, '', url)
+    }
+    return <AdminScenarios onLoad={handleLoadScenario} />
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -1181,6 +1223,10 @@ export default function App() {
             </div>
           </div>
         </div>
+        <footer className="mt-8 text-center text-xs text-slate-600">
+          Anonymous usage data (scenario inputs and approximate location) is logged for the site
+          owner's analytics.
+        </footer>
       </div>
 
       <PrintReport

@@ -32,6 +32,8 @@ jobs:
           exit 1
       - run: npm test
       - run: npm run build
+        env:
+          VITE_SCENARIO_LOG_URL: ${{ secrets.VITE_SCENARIO_LOG_URL }}
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

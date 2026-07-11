@@ -2,6 +2,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
 .DS_Store
 
 # Generated on this machine against an internal corporate npm registry mirror;
