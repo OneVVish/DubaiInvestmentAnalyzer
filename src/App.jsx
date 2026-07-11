@@ -144,6 +144,22 @@ function PillToggle({ options, value, onChange }) {
   )
 }
 
+function TextInput({ label, value, onChange, placeholder, description }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-slate-300">{label}</label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-amber-400 focus:outline-none"
+      />
+      {description && <p className="mt-1.5 text-xs text-slate-500">{description}</p>}
+    </div>
+  )
+}
+
 function Dropdown({ label, value, onChange, options, description }) {
   return (
     <div>
@@ -174,6 +190,8 @@ const DEFAULT_PRICE_PER_SQFT = getPricePerSqft(DEFAULT_COMMUNITY, DEFAULT_ASSET_
 const DEFAULT_PROPERTY_PRICE = DEFAULT_PRICE_PER_SQFT ? DEFAULT_SIZE_SQFT * DEFAULT_PRICE_PER_SQFT : 1500000
 
 const DEFAULT_INPUTS = {
+  propertyName: '',
+  propertyType: '',
   propertyPrice: DEFAULT_PROPERTY_PRICE,
   monthlyRent: Math.round((DEFAULT_PROPERTY_PRICE * (DEFAULT_RENTAL_YIELD / 100)) / 12),
   rentInflation: 5,
@@ -510,6 +528,20 @@ export default function App() {
           {/* Inputs */}
           <div className="space-y-5">
             <SectionCard title="The Property">
+              <TextInput
+                label="Property Name"
+                value={inputs.propertyName}
+                onChange={setField('propertyName')}
+                placeholder="e.g. Marina Gate Tower 2, Unit 1408"
+                description="A label for your own reference — purely informational, not used in any calculation."
+              />
+              <TextInput
+                label="Property Type"
+                value={inputs.propertyType}
+                onChange={setField('propertyType')}
+                placeholder="e.g. 2 Bed, 3 Bed + Maid's"
+                description="Free text — also purely informational, not used in any calculation."
+              />
               <Dropdown
                 label="Community"
                 value={inputs.community}

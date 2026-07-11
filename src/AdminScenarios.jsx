@@ -67,6 +67,7 @@ export default function AdminScenarios({ onLoad }) {
             <tr className="border-b border-slate-800 text-xs uppercase tracking-wider text-slate-400">
               <th className="px-4 py-3">Timestamp</th>
               <th className="px-4 py-3">Visitor Location</th>
+              <th className="px-4 py-3">Property Name</th>
               <th className="px-4 py-3">Community</th>
               <th className="px-4 py-3">Property Price</th>
               <th className="px-4 py-3"></th>
@@ -81,6 +82,7 @@ export default function AdminScenarios({ onLoad }) {
                   <td className="px-4 py-3 text-slate-300">
                     {[row.city, row.country].filter(Boolean).join(', ') || '-'}
                   </td>
+                  <td className="px-4 py-3 text-slate-300">{row.scenario?.propertyName || '-'}</td>
                   <td className="px-4 py-3 text-slate-300">{community ?? row.scenario?.community ?? '-'}</td>
                   <td className="px-4 py-3 text-slate-300">
                     {row.scenario?.propertyPrice != null ? row.scenario.propertyPrice.toLocaleString() : '-'}

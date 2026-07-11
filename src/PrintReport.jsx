@@ -325,6 +325,8 @@ export default function PrintReport({
       <section className="mb-6 grid grid-cols-2 gap-x-10" style={{ breakInside: 'avoid' }}>
         <div>
           <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">The Property</h2>
+          {inputs.propertyName && <InputRow label="Property Name" value={inputs.propertyName} />}
+          {inputs.propertyType && <InputRow label="Property Type" value={inputs.propertyType} />}
           <InputRow label="Property Price" value={fmt(inputs.propertyPrice, false)} />
           <InputRow label="Monthly Rent (Collected)" value={fmt(inputs.monthlyRent, false)} />
           <InputRow label="Asset Class" value={inputs.assetClass === 'CONDO' ? 'Condo' : 'Townhouse / Villa'} />
