@@ -286,17 +286,19 @@ export function runSimulation(inputs) {
   const renterCashFlows = [-(downPayment + dldFee)]
 
   for (let month = 1; month <= MONTHS; month++) {
-    // Home appreciation starts compounding from month 1 (year 1 already
-    // reflects a year of growth) — deliberately on a different schedule
-    // than rent/cost inflation below, which still wait a full year before
-    // their first step. Pre-handover rate applies while off-plan
-    // construction is still in progress; Ready properties (never off-plan)
-    // always use the post-handover rate, since they have no construction
-    // phase at all.
-    if ((month - 1) % 12 === 0) {
-      const rate = isOffPlan && !handoverDone ? effectivePreHandoverAppreciation : effectivePostHandoverAppreciation
-      homeValue *= 1 + rate / 100
-    }
+    // Home appreciation compounds every month, at the twelfth root of the
+    // annual rate — smooth growth, not a once-a-year jump — so a monthly
+    // timeline (the Flip chart) shows a gradually rising line rather than a
+    // staircase. Twelve consecutive months at this rate multiply out to
+    // exactly the same annual factor as before, so every year-boundary value
+    // (the only ones Hold/Ready ever display) is unchanged — only the
+    // in-between months look different. Deliberately on a different
+    // schedule than rent/cost inflation below, which still step once a
+    // year. Pre-handover rate applies while off-plan construction is still
+    // in progress; Ready properties (never off-plan) always use the
+    // post-handover rate, since they have no construction phase at all.
+    const appreciationRate = isOffPlan && !handoverDone ? effectivePreHandoverAppreciation : effectivePostHandoverAppreciation
+    homeValue *= (1 + appreciationRate / 100) ** (1 / 12)
     if (month > 1 && (month - 1) % 12 === 0) {
       rent *= 1 + rentInflation / 100
       serviceCharges *= 1 + costInflation / 100

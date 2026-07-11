@@ -505,6 +505,25 @@ describe('runSimulation — flipMonthlyData (month-by-month timeline for a Flip)
     const distinctValues = new Set(flipMonthlyData.map((d) => d.buyerCostBasisEquity))
     expect(distinctValues.size).toBeGreaterThan(3)
   })
+
+  it('homeValue compounds smoothly every month, not in once-a-year steps', () => {
+    const { flipMonthlyData } = runSimulation({
+      ...base,
+      propertyStatus: 'OFFPLAN',
+      developerPlan: 'EMAAR',
+      exitStrategy: 'FLIP',
+      preHandoverAppreciation: 12,
+    })
+    // A once-a-year step would leave homeValue flat for 11 straight months
+    // after each jump (months 2-12, 14-24, 26-36). With monthly compounding,
+    // every single month grows over the last.
+    for (let i = 1; i < flipMonthlyData.length; i++) {
+      expect(flipMonthlyData[i].homeValue).toBeGreaterThan(flipMonthlyData[i - 1].homeValue)
+    }
+    // Twelve monthly steps at the twelfth root multiply out to exactly the
+    // old single annual step — month 12 matches price * (1 + rate) exactly.
+    expect(flipMonthlyData[11].homeValue).toBe(Math.round(1000000 * 1.12))
+  })
 })
 
 describe('runSimulation — equity vs appreciation breakdown', () => {
