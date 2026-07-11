@@ -6,10 +6,49 @@
 // current at call time (and is straightforward to stub in tests).
 const getLogUrl = () => import.meta.env.VITE_SCENARIO_LOG_URL
 
+// Not real security (a determined bot spoofs both signals trivially) — just
+// a cheap filter against the naive/automated traffic that would otherwise
+// burn the free ipapi.co quota and fill the Sheet with junk rows.
+// navigator.webdriver is set to true by essentially every headless
+// automation framework (Selenium, Playwright, Puppeteer) under its default
+// settings; the user-agent check catches search/SEO crawlers and common
+// non-browser HTTP clients that still happen to run this JS (rare, but
+// cheap to also cover).
+const BOT_USER_AGENT_SIGNATURES = [
+  'bot',
+  'spider',
+  'crawl',
+  'slurp',
+  'headless',
+  'phantomjs',
+  'puppeteer',
+  'playwright',
+  'selenium',
+  'curl',
+  'wget',
+  'python-requests',
+  'python-urllib',
+  'axios',
+  'node-fetch',
+  'go-http-client',
+  'java/',
+  'libwww-perl',
+  'httpclient',
+]
+
+export function isLikelyBot() {
+  if (typeof navigator === 'undefined') return true
+  if (navigator.webdriver) return true
+  const userAgent = (navigator.userAgent || '').toLowerCase()
+  return BOT_USER_AGENT_SIGNATURES.some((signature) => userAgent.includes(signature))
+}
+
 // Gathers what's available synchronously from the browser, then best-effort
 // resolves an approximate IP-based location from a free, keyless lookup —
 // silent, no permission prompt (unlike navigator.geolocation, which always
 // shows one). Never throws; a failed/timed-out lookup just omits location.
+// Skips the geolocation call entirely for detected automation — no point
+// spending the free quota on traffic that was never a real visitor.
 export async function collectVisitorContext() {
   const context = {
     userAgent: navigator.userAgent,
@@ -18,6 +57,7 @@ export async function collectVisitorContext() {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     language: navigator.language,
   }
+  if (isLikelyBot()) return context
   try {
     const response = await fetch('https://ipapi.co/json/')
     const location = await response.json()
@@ -46,7 +86,7 @@ export async function collectVisitorContext() {
 // column in the Sheet already captures it, with no backend/schema change.
 export function logScenario(inputs, visitorContext, trigger) {
   const logUrl = getLogUrl()
-  if (!logUrl) return
+  if (!logUrl || isLikelyBot()) return
   fetch(logUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
