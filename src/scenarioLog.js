@@ -39,13 +39,18 @@ export async function collectVisitorContext() {
 // custom Content-Type on a cross-origin request triggers a CORS preflight
 // (an OPTIONS request) that Apps Script Web Apps don't handle, so the POST
 // would silently fail. The Apps Script side still JSON.parses the raw body.
-export function logScenario(inputs, visitorContext) {
+//
+// `trigger` records *why* this row was logged ('open', 'share', 'export_csv',
+// 'download_pdf', 'save_defaults') — folded into the scenario object itself
+// (not a separate field in the POST body) so the existing single ScenarioJSON
+// column in the Sheet already captures it, with no backend/schema change.
+export function logScenario(inputs, visitorContext, trigger) {
   const logUrl = getLogUrl()
   if (!logUrl) return
   fetch(logUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ scenario: inputs, visitor: visitorContext }),
+    body: JSON.stringify({ scenario: { ...inputs, logTrigger: trigger }, visitor: visitorContext }),
   }).catch(() => {
     // Best-effort only — ignore network/CORS/quota failures.
   })

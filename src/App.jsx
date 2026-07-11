@@ -292,6 +292,11 @@ export default function App() {
   const handleTaxResidenceChange = (taxResidence) =>
     setInputs((prev) => applyTaxProfileDefaults(prev, prev.citizenship, taxResidence))
 
+  // Resolved once by the mount effect below, then reused by the explicit
+  // action loggers further down (Share/Export/Download/Save) — so clicking
+  // those doesn't re-run the geolocation lookup every time.
+  const [visitorContext, setVisitorContext] = useState(null)
+
   // Fires once on mount only (not on every input edit) — logs whatever
   // scenario is active at that moment ("where it was opened"), then, only
   // on a genuinely fresh visit (no shared link, no saved defaults already
@@ -302,7 +307,8 @@ export default function App() {
   useEffect(() => {
     if (isAdminView) return
     collectVisitorContext().then((visitor) => {
-      logScenario(inputs, visitor)
+      setVisitorContext(visitor)
+      logScenario(inputs, visitor, 'open')
       if (!sharedState?.inputs && !loadUserDefaults()) {
         const geo = getGeoDefaults(visitor.country_code)
         if (geo) {
@@ -404,13 +410,18 @@ export default function App() {
   const buyerWinsAt30 = finalYear && finalYear.buyerNetWorth > finalYear.renterNetWorth
 
   const handleDownloadPdf = () => {
+    logScenario(inputs, visitorContext, 'download_pdf')
     window.dispatchEvent(new Event('resize'))
     window.print()
   }
 
-  const handleExportCsv = () => downloadCsv('dubai-investment-analyzer-scenario.csv', buildCsv(data))
+  const handleExportCsv = () => {
+    logScenario(inputs, visitorContext, 'export_csv')
+    downloadCsv('dubai-investment-analyzer-scenario.csv', buildCsv(data))
+  }
 
   const handleShare = async () => {
+    logScenario(inputs, visitorContext, 'share')
     const url = buildShareUrl({ inputs })
     try {
       await navigator.clipboard.writeText(url)
@@ -422,6 +433,7 @@ export default function App() {
   }
 
   const handleSaveDefaults = () => {
+    logScenario(inputs, visitorContext, 'save_defaults')
     saveUserDefaults(inputs)
     setSavedDefaults(true)
     setTimeout(() => setSavedDefaults(false), 2000)

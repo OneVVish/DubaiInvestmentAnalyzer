@@ -68,13 +68,32 @@ describe('logScenario', () => {
     vi.stubEnv('VITE_SCENARIO_LOG_URL', 'https://script.google.com/macros/s/fake/exec')
     const fetchSpy = vi.fn().mockResolvedValue({})
     vi.stubGlobal('fetch', fetchSpy)
-    logScenario({ propertyPrice: 1000000 }, { city: 'Dubai' })
+    logScenario({ propertyPrice: 1000000 }, { city: 'Dubai' }, 'open')
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://script.google.com/macros/s/fake/exec',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ scenario: { propertyPrice: 1000000 }, visitor: { city: 'Dubai' } }),
+        body: JSON.stringify({
+          scenario: { propertyPrice: 1000000, logTrigger: 'open' },
+          visitor: { city: 'Dubai' },
+        }),
+      }),
+    )
+  })
+
+  it('folds the trigger into the scenario payload even when omitted (undefined, not a crash)', () => {
+    vi.stubEnv('VITE_SCENARIO_LOG_URL', 'https://script.google.com/macros/s/fake/exec')
+    const fetchSpy = vi.fn().mockResolvedValue({})
+    vi.stubGlobal('fetch', fetchSpy)
+    logScenario({ propertyPrice: 1000000 }, { city: 'Dubai' })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://script.google.com/macros/s/fake/exec',
+      expect.objectContaining({
+        body: JSON.stringify({
+          scenario: { propertyPrice: 1000000, logTrigger: undefined },
+          visitor: { city: 'Dubai' },
+        }),
       }),
     )
   })
